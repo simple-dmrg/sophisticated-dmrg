@@ -119,7 +119,7 @@ def index_map(array):
         d.setdefault(value, []).append(index)
     return d
 
-def single_dmrg_step(sys, env, m, target_Sz, psi0_guess=None):
+def single_dmrg_step(sys, env, m, target_Sz=None, psi0_guess=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -149,27 +149,43 @@ def single_dmrg_step(sys, env, m, target_Sz, psi0_guess=None):
     superblock_hamiltonian = kron(sys_enl_op["H"], identity(m_env_enl)) + kron(identity(m_sys_enl), env_enl_op["H"]) + \
                              H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"])
 
-    # Build up a "restricted" basis of states in the target sector and
-    # reconstruct the superblock Hamiltonian in that sector.
-    sector_indices = {} # will contain indices of the new (restricted) basis
-                        # for which the enlarged system is in a given sector
-    restricted_basis_indices = []  # will contain indices of the old (full) basis, which we are mapping to
-    for sys_enl_Sz, sys_enl_basis_states in sys_enl_basis_by_sector.items():
-        sector_indices[sys_enl_Sz] = []
-        env_enl_Sz = target_Sz - sys_enl_Sz
-        if env_enl_Sz in env_enl_basis_by_sector:
-            for i in sys_enl_basis_states:
-                i_offset = m_env_enl * i  # considers the tensor product structure of the superblock basis
-                for j in env_enl_basis_by_sector[env_enl_Sz]:
-                    current_index = len(restricted_basis_indices)  # about-to-be-added index of restricted_basis_indices
-                    sector_indices[sys_enl_Sz].append(current_index)
-                    restricted_basis_indices.append(i_offset + j)
+    if target_Sz is not None:
+        # Build up a "restricted" basis of states in the target sector and
+        # reconstruct the superblock Hamiltonian in that sector.
+        sector_indices = {} # will contain indices of the new (restricted) basis
+                            # for which the enlarged system is in a given sector
+        restricted_basis_indices = []  # will contain indices of the old (full) basis, which we are mapping to
+        for sys_enl_Sz, sys_enl_basis_states in sys_enl_basis_by_sector.items():
+            sector_indices[sys_enl_Sz] = []
+            env_enl_Sz = target_Sz - sys_enl_Sz
+            if env_enl_Sz in env_enl_basis_by_sector:
+                for i in sys_enl_basis_states:
+                    i_offset = m_env_enl * i  # considers the tensor product structure of the superblock basis
+                    for j in env_enl_basis_by_sector[env_enl_Sz]:
+                        current_index = len(restricted_basis_indices)  # about-to-be-added index of restricted_basis_indices
+                        sector_indices[sys_enl_Sz].append(current_index)
+                        restricted_basis_indices.append(i_offset + j)
 
-    restricted_superblock_hamiltonian = superblock_hamiltonian[:, restricted_basis_indices][restricted_basis_indices, :]
-    if psi0_guess is not None:
-        restricted_psi0_guess = psi0_guess[restricted_basis_indices]
+        restricted_superblock_hamiltonian = superblock_hamiltonian[:, restricted_basis_indices][restricted_basis_indices, :]
+        if psi0_guess is not None:
+            restricted_psi0_guess = psi0_guess[restricted_basis_indices]
+        else:
+            restricted_psi0_guess = None
+
     else:
-        restricted_psi0_guess = None
+        # Our "restricted" basis is really just the original basis.  The only
+        # thing to do is to build the `sector_indices` dictionary, which tells
+        # which elements of our superblock basis correspond to a given sector
+        # in the enlarged system.
+        sector_indices = {}
+        restricted_basis_indices = range(m_sys_enl * m_env_enl)
+        for sys_enl_Sz, sys_enl_basis_states in sys_enl_basis_by_sector.items():
+            sector_indices[sys_enl_Sz] = [] # m_env_enl
+            for i in sys_enl_basis_states:
+                sector_indices[sys_enl_Sz].extend(range(m_env_enl * i, m_env_enl * (i + 1)))
+
+        restricted_superblock_hamiltonian = superblock_hamiltonian
+        restricted_psi0_guess = psi0_guess
 
     # Call ARPACK to find the superblock ground state.  ("SA" means find the
     # "smallest in amplitude" eigenvalue.)
@@ -259,7 +275,10 @@ def infinite_system_algorithm(L, m, target_Sz):
     # reflection of the current block as the environment.
     while 2 * block.length < L:
         current_L = 2 * block.length + 2  # current superblock length
-        current_target_Sz = int(target_Sz) * current_L // L
+        if target_Sz is not None:
+            current_target_Sz = int(target_Sz) * current_L // L
+        else:
+            current_target_Sz = None
         print("L =", current_L)
         block, energy, transformation_matrix, psi0 = single_dmrg_step(block, block, m=m, target_Sz=current_target_Sz)
         print("E/L =", energy / current_L)
@@ -283,7 +302,10 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
         # Perform a single DMRG step and save the new Block to "disk"
         print(graphic(block, block))
         current_L = 2 * block.length + 2  # current superblock length
-        current_target_Sz = int(target_Sz) * current_L // L
+        if target_Sz is not None:
+            current_target_Sz = int(target_Sz) * current_L // L
+        else:
+            current_target_Sz = None
         block, energy, transformation_matrix, psi0 = single_dmrg_step(block, block, m=m_warmup, target_Sz=current_target_Sz)
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
