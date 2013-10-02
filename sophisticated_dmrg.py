@@ -1,14 +1,10 @@
 #!/usr/bin/env python
 #
-# Simple DMRG tutorial.  This code integrates the following concepts:
-#  - Infinite system algorithm
-#  - Finite system algorithm
-#  - Conserved quantum numbers
-#  - Eigenstate prediction
+# "Sophisticated DMRG," originally based on the simple-dmrg tutorial.
 #
 # Copyright 2013 James R. Garrison and Ryan V. Mishmash.
 # Open source under the MIT license.  Source code at
-# <https://github.com/simple-dmrg/simple-dmrg/>
+# <https://github.com/simple-dmrg/sophisticated-dmrg/>
 
 # This code will run under any version of Python >= 2.6.  The following line
 # provides consistency between python2 and python3.
