@@ -35,14 +35,15 @@ def is_valid_block(block):
 is_valid_enlarged_block = is_valid_block
 
 # Model-specific code for the Heisenberg XXZ chain
+dtype = 'd'  # double-precision floating point
 model_d = 2  # single-site basis size
 single_site_sectors = np.array([0.5, -0.5])  # S^z sectors corresponding to the
                                              # single site basis elements
 
-Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype='d')  # single-site S^z
-Sp1 = np.array([[0, 1], [0, 0]], dtype='d')  # single-site S^+
+Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype)  # single-site S^z
+Sp1 = np.array([[0, 1], [0, 0]], dtype)  # single-site S^+
 
-H1 = np.array([[0, 0], [0, 0]], dtype='d')  # single-site portion of H is zero
+H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
 
 def H2(Sz1, Sp1, Sz2, Sp2):  # two-site part of H
     """Given the operators S^z and S^+ on two sites in different Hilbert spaces
@@ -201,9 +202,9 @@ def single_dmrg_step(sys, env, m, target_Sz, psi0_guess=None):
     # eigenvectors.  It will have sparse structure due to the conserved quantum
     # number.
     my_m = min(len(possible_eigenstates), m)
-    transformation_matrix = lil_matrix((sys_enl.basis_size, my_m), dtype='d')
-    new_sector_array = np.zeros((my_m,), dtype='d')  # lists the sector of each
-                                                     # element of the new/truncated basis
+    transformation_matrix = lil_matrix((sys_enl.basis_size, my_m), dtype=dtype)
+    new_sector_array = np.zeros((my_m,), dtype)  # lists the sector of each
+                                                 # element of the new/truncated basis
     for i, (eval, evec, Sz_sector, current_sector_basis) in enumerate(possible_eigenstates[:my_m]):
         for j, v in zip(current_sector_basis, evec):
             transformation_matrix[j, i] = v
@@ -229,7 +230,7 @@ def single_dmrg_step(sys, env, m, target_Sz, psi0_guess=None):
 
     # Construct psi0 (that is, in the full superblock basis) so we can use it
     # later for eigenstate prediction.
-    psi0 = np.zeros([m_sys_enl * m_env_enl, 1], dtype='d')
+    psi0 = np.zeros([m_sys_enl * m_env_enl, 1], dtype)
     for i, z in enumerate(restricted_basis_indices):
         psi0[z, 0] = restricted_psi0[i, 0]
     if psi0_guess is not None:
