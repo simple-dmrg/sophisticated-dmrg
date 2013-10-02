@@ -35,64 +35,78 @@ def is_valid_block(block):
 is_valid_enlarged_block = is_valid_block
 
 # Model-specific code for the Heisenberg XXZ chain
-dtype = 'd'  # double-precision floating point
-model_d = 2  # single-site basis size
-single_site_sectors = np.array([0.5, -0.5])  # S^z sectors corresponding to the
-                                             # single site basis elements
+class HeisenbergChainXXZ(object):
+    dtype = 'd'  # double-precision floating point
+    d = 2  # single-site basis size
 
-Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype)  # single-site S^z
-Sp1 = np.array([[0, 1], [0, 0]], dtype)  # single-site S^+
+    Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype)  # single-site S^z
+    Sp1 = np.array([[0, 1], [0, 0]], dtype)  # single-site S^+
 
-H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
+    # S^z sectors corresponding to the single site basis elements
+    single_site_sectors = np.array([0.5, -0.5])
 
-def H2(Sz1, Sp1, Sz2, Sp2):  # two-site part of H
-    """Given the operators S^z and S^+ on two sites in different Hilbert spaces
-    (e.g. two blocks), returns a Kronecker product representing the
-    corresponding two-site term in the Hamiltonian that joins the two sites.
-    """
-    J = Jz = 1.
-    return (
-        (J / 2) * (kron(Sp1, Sp2.conjugate().transpose()) + kron(Sp1.conjugate().transpose(), Sp2)) +
-        Jz * kron(Sz1, Sz2)
-    )
+    H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
 
-# conn refers to the connection operator, that is, the operator on the edge of
-# the block, on the interior of the chain.  We need to be able to represent S^z
-# and S^+ on that site in the current basis in order to grow the chain.
-initial_block = Block(length=1, basis_size=model_d, operator_dict={
-    "H": H1,
-    "conn_Sz": Sz1,
-    "conn_Sp": Sp1,
-}, basis_sector_array=single_site_sectors)
+    def __init__(self, J=1., Jz=1.):
+        self.J = J
+        self.Jz = Jz
 
-def enlarge_block(block):
-    """This function enlarges the provided Block by a single site, returning an
-    EnlargedBlock.
-    """
-    mblock = block.basis_size
-    o = block.operator_dict
+    def H2(self, Sz1, Sp1, Sz2, Sp2):  # two-site part of H
+        """Given the operators S^z and S^+ on two sites in different Hilbert spaces
+        (e.g. two blocks), returns a Kronecker product representing the
+        corresponding two-site term in the Hamiltonian that joins the two sites.
+        """
+        return (
+            (self.J / 2) * (kron(Sp1, Sp2.conjugate().transpose()) +
+                            kron(Sp1.conjugate().transpose(), Sp2)) +
+            self.Jz * kron(Sz1, Sz2)
+        )
 
-    # Create the new operators for the enlarged block.  Our basis becomes a
-    # Kronecker product of the Block basis and the single-site basis.  NOTE:
-    # `kron` uses the tensor product convention making blocks of the second
-    # array scaled by the first.  As such, we adopt this convention for
-    # Kronecker products throughout the code.
-    enlarged_operator_dict = {
-        "H": kron(o["H"], identity(model_d)) + kron(identity(mblock), H1) + H2(o["conn_Sz"], o["conn_Sp"], Sz1, Sp1),
-        "conn_Sz": kron(identity(mblock), Sz1),
-        "conn_Sp": kron(identity(mblock), Sp1),
-    }
+    def initial_block(self):
+        # conn refers to the connection operator, that is, the operator on the edge of
+        # the block, on the interior of the chain.  We need to be able to represent S^z
+        # and S^+ on that site in the current basis in order to grow the chain.
+        return Block(length=1, basis_size=self.d, operator_dict={
+            "H": self.H1,
+            "conn_Sz": self.Sz1,
+            "conn_Sp": self.Sp1,
+        }, basis_sector_array=self.single_site_sectors)
 
-    # This array keeps track of which sector each element of the new basis is
-    # in.  `np.add.outer()` creates a matrix that adds each element of the
-    # first vector with each element of the second, which when flattened
-    # contains the sector of each basis element in the above Kronecker product.
-    enlarged_basis_sector_array = np.add.outer(block.basis_sector_array, single_site_sectors).flatten()
+    def enlarge_block(self, block):
+        """This function enlarges the provided Block by a single site, returning an
+        EnlargedBlock.
+        """
+        mblock = block.basis_size
+        o = block.operator_dict
 
-    return EnlargedBlock(length=(block.length + 1),
-                         basis_size=(block.basis_size * model_d),
-                         operator_dict=enlarged_operator_dict,
-                         basis_sector_array=enlarged_basis_sector_array)
+        # Create the new operators for the enlarged block.  Our basis becomes a
+        # Kronecker product of the Block basis and the single-site basis.  NOTE:
+        # `kron` uses the tensor product convention making blocks of the second
+        # array scaled by the first.  As such, we adopt this convention for
+        # Kronecker products throughout the code.
+        enlarged_operator_dict = {
+            "H": kron(o["H"], identity(self.d)) + kron(identity(mblock), self.H1) + self.H2(o["conn_Sz"], o["conn_Sp"], self.Sz1, self.Sp1),
+            "conn_Sz": kron(identity(mblock), self.Sz1),
+            "conn_Sp": kron(identity(mblock), self.Sp1),
+        }
+
+        # This array keeps track of which sector each element of the new basis is
+        # in.  `np.add.outer()` creates a matrix that adds each element of the
+        # first vector with each element of the second, which when flattened
+        # contains the sector of each basis element in the above Kronecker product.
+        enlarged_basis_sector_array = np.add.outer(block.basis_sector_array, self.single_site_sectors).flatten()
+
+        return EnlargedBlock(length=(block.length + 1),
+                             basis_size=(block.basis_size * self.d),
+                             operator_dict=enlarged_operator_dict,
+                             basis_sector_array=enlarged_basis_sector_array)
+
+    def construct_superblock_hamiltonian(self, sys_enl, env_enl):
+        sys_enl_op = sys_enl.operator_dict
+        env_enl_op = env_enl.operator_dict
+        return (kron(sys_enl_op["H"], identity(env_enl.basis_size)) +
+                kron(identity(sys_enl.basis_size), env_enl_op["H"]) +
+                self.H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"]))
 
 def rotate_and_truncate(operator, transformation_matrix):
     """Transforms the operator to the new (possibly truncated) basis given by
@@ -119,7 +133,7 @@ def index_map(array):
         d.setdefault(value, []).append(index)
     return d
 
-def single_dmrg_step(sys, env, m, target_Sz=None, psi0_guess=None):
+def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -129,25 +143,23 @@ def single_dmrg_step(sys, env, m, target_Sz=None, psi0_guess=None):
     assert is_valid_block(env)
 
     # Enlarge each block by a single site.
-    sys_enl = enlarge_block(sys)
+    sys_enl = model.enlarge_block(sys)
     sys_enl_basis_by_sector = index_map(sys_enl.basis_sector_array)
     if sys is env:  # no need to recalculate a second time
         env_enl = sys_enl
         env_enl_basis_by_sector = sys_enl_basis_by_sector
     else:
-        env_enl = enlarge_block(env)
+        env_enl = model.enlarge_block(env)
         env_enl_basis_by_sector = index_map(env_enl.basis_sector_array)
 
     assert is_valid_enlarged_block(sys_enl)
     assert is_valid_enlarged_block(env_enl)
 
-    # Construct the full superblock Hamiltonian.
     m_sys_enl = sys_enl.basis_size
     m_env_enl = env_enl.basis_size
-    sys_enl_op = sys_enl.operator_dict
-    env_enl_op = env_enl.operator_dict
-    superblock_hamiltonian = kron(sys_enl_op["H"], identity(m_env_enl)) + kron(identity(m_sys_enl), env_enl_op["H"]) + \
-                             H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"])
+
+    # Construct the full superblock Hamiltonian.
+    superblock_hamiltonian = model.construct_superblock_hamiltonian(sys_enl, env_enl)
 
     if target_Sz is not None:
         # Build up a "restricted" basis of states in the target sector and
@@ -218,9 +230,9 @@ def single_dmrg_step(sys, env, m, target_Sz=None, psi0_guess=None):
     # eigenvectors.  It will have sparse structure due to the conserved quantum
     # number.
     my_m = min(len(possible_eigenstates), m)
-    transformation_matrix = lil_matrix((sys_enl.basis_size, my_m), dtype=dtype)
-    new_sector_array = np.zeros((my_m,), dtype)  # lists the sector of each
-                                                 # element of the new/truncated basis
+    transformation_matrix = lil_matrix((sys_enl.basis_size, my_m), dtype=model.dtype)
+    new_sector_array = np.zeros((my_m,), model.dtype)  # lists the sector of each
+                                                       # element of the new/truncated basis
     for i, (eval, evec, Sz_sector, current_sector_basis) in enumerate(possible_eigenstates[:my_m]):
         for j, v in zip(current_sector_basis, evec):
             transformation_matrix[j, i] = v
@@ -246,7 +258,7 @@ def single_dmrg_step(sys, env, m, target_Sz=None, psi0_guess=None):
 
     # Construct psi0 (that is, in the full superblock basis) so we can use it
     # later for eigenstate prediction.
-    psi0 = np.zeros([m_sys_enl * m_env_enl, 1], dtype)
+    psi0 = np.zeros([m_sys_enl * m_env_enl, 1], model.dtype)
     for i, z in enumerate(restricted_basis_indices):
         psi0[z, 0] = restricted_psi0[i, 0]
     if psi0_guess is not None:
@@ -269,8 +281,8 @@ def graphic(sys_block, env_block, sys_label="l"):
         graphic = graphic[::-1]
     return graphic
 
-def infinite_system_algorithm(L, m, target_Sz):
-    block = initial_block
+def infinite_system_algorithm(model, L, m, target_Sz):
+    block = model.initial_block()
     # Repeatedly enlarge the system by performing a single DMRG step, using a
     # reflection of the current block as the environment.
     while 2 * block.length < L:
@@ -280,10 +292,10 @@ def infinite_system_algorithm(L, m, target_Sz):
         else:
             current_target_Sz = None
         print("L =", current_L)
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(block, block, m=m, target_Sz=current_target_Sz)
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, target_Sz=current_target_Sz)
         print("E/L =", energy / current_L)
 
-def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
+def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_Sz):
     assert L % 2 == 0  # require that L is an even number
 
     # To keep things simple, these dictionaries are not actually saved to disk,
@@ -295,7 +307,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
     # we construct a block, we save it for future reference as both a left
     # ("l") and right ("r") block, as the infinite system algorithm assumes the
     # environment is a mirror image of the system.
-    block = initial_block
+    block = model.initial_block()
     block_disk["l", block.length] = block
     block_disk["r", block.length] = block
     while 2 * block.length < L:
@@ -306,7 +318,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
             current_target_Sz = int(target_Sz) * current_L // L
         else:
             current_target_Sz = None
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(block, block, m=m_warmup, target_Sz=current_target_Sz)
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, target_Sz=current_target_Sz)
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
         block_disk["r", block.length] = block
@@ -347,7 +359,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
                 # First we reshape the psi0 vector into a matrix with rows
                 # corresponding to the enlarged system basis and columns
                 # corresponding to the enlarged environment basis.
-                psi0_a = psi0.reshape((-1, env_trmat.shape[1] * model_d), order="C")
+                psi0_a = psi0.reshape((-1, env_trmat.shape[1] * model.d), order="C")
                 # Now we transform the enlarged system block into a system
                 # block, so that psi0_b looks like ====*-- (with only one
                 # intermediate site).
@@ -358,7 +370,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
                 # (sys_block, extra_site, env_block).  In other words, the
                 # single intermediate site should now be part of a new enlarged
                 # system, not part of the enlarged environment.
-                psi0_c = psi0_b.reshape((-1, env_trmat.shape[1], model_d), order="C").transpose(0, 2, 1)
+                psi0_c = psi0_b.reshape((-1, env_trmat.shape[1], model.d), order="C").transpose(0, 2, 1)
                 # Now we reshape the psi0 vector into a matrix with rows
                 # corresponding to the enlarged system and columns
                 # corresponding to the environment block.
@@ -370,7 +382,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
 
             # Perform a single DMRG step.
             print(graphic(sys_block, env_block, sys_label))
-            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(sys_block, env_block, m=m, target_Sz=target_Sz, psi0_guess=psi0_guess)
+            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, target_Sz=target_Sz, psi0_guess=psi0_guess)
 
             print("E/L =", energy / L)
 
@@ -385,5 +397,7 @@ def finite_system_algorithm(L, m_warmup, m_sweep_list, target_Sz):
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
-    #infinite_system_algorithm(L=100, m=20, target_Sz=0)
-    finite_system_algorithm(L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_Sz=0)
+    model = HeisenbergChainXXZ(J=1., Jz=1.)
+
+    #infinite_system_algorithm(model, L=100, m=20, target_Sz=0)
+    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_Sz=0)
