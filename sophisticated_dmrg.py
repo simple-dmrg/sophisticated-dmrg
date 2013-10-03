@@ -108,6 +108,78 @@ class HeisenbergChainXXZ(object):
                 kron(identity(sys_enl.basis_size), env_enl_op["H"]) +
                 self.H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"]))
 
+# Model-specific code for the Bose-Hubbard chain
+class BoseHubbardChain(object):
+    dtype = 'd'  # double-precision floating point
+
+    def __init__(self, d, U=0., mu=0., t=1.):
+        self.t = t  # hopping
+        self.U = U  # on-site interaction
+        assert d >= 2
+        self.d = d  # single-site basis size (enforces a maximum of d-1 particles on a site)
+        ndiag = np.array(range(d), self.dtype)
+        self.single_site_sectors = ndiag
+        self.n_op = np.diag(ndiag)
+        self.b_op = np.diag(np.sqrt(ndiag[1:]), k=1)  # k=1 => upper diagonal
+        assert np.sum(np.abs(self.n_op - self.b_op.transpose().dot(self.b_op))) < 1e-4
+        self.H1 = np.diag(.5 * U * ndiag * (ndiag - 1) - mu * ndiag)  # single-site term of H
+
+    def initial_block(self):
+        # conn refers to the connection operator, that is, the operator on the
+        # edge of the block, on the interior of the chain.  We need to be able
+        # to represent b on that site in the current basis in order to grow the
+        # chain.
+        return Block(length=1, basis_size=self.d, operator_dict={
+            "H": self.H1,
+            "conn_n": self.n_op,
+            "conn_b": self.b_op,
+        }, basis_sector_array=self.single_site_sectors)
+
+    def H2(self, b1, b2):  # two-site part of H
+        """Given the operator b on two sites in different Hilbert spaces
+        (e.g. two blocks), returns a Kronecker product representing the
+        corresponding two-site term in the Hamiltonian that joins the two
+        sites.
+        """
+        return -self.t * (kron(b1, b2.conjugate().transpose()) +
+                          kron(b1.conjugate().transpose(), b2))
+
+    def enlarge_block(self, block):
+        """This function enlarges the provided Block by a single site, returning an
+        EnlargedBlock.
+        """
+        mblock = block.basis_size
+        o = block.operator_dict
+
+        # Create the new operators for the enlarged block.  Our basis becomes a
+        # Kronecker product of the Block basis and the single-site basis.  NOTE:
+        # `kron` uses the tensor product convention making blocks of the second
+        # array scaled by the first.  As such, we adopt this convention for
+        # Kronecker products throughout the code.
+        enlarged_operator_dict = {
+            "H": kron(o["H"], identity(self.d)) + kron(identity(mblock), self.H1) + self.H2(o["conn_b"], self.b_op),
+            "conn_n": kron(identity(mblock), self.n_op),
+            "conn_b": kron(identity(mblock), self.b_op),
+        }
+
+        # This array keeps track of which sector each element of the new basis is
+        # in.  `np.add.outer()` creates a matrix that adds each element of the
+        # first vector with each element of the second, which when flattened
+        # contains the sector of each basis element in the above Kronecker product.
+        enlarged_basis_sector_array = np.add.outer(block.basis_sector_array, self.single_site_sectors).flatten()
+
+        return EnlargedBlock(length=(block.length + 1),
+                             basis_size=(block.basis_size * self.d),
+                             operator_dict=enlarged_operator_dict,
+                             basis_sector_array=enlarged_basis_sector_array)
+
+    def construct_superblock_hamiltonian(self, sys_enl, env_enl):
+        sys_enl_op = sys_enl.operator_dict
+        env_enl_op = env_enl.operator_dict
+        return (kron(sys_enl_op["H"], identity(env_enl.basis_size)) +
+                kron(identity(sys_enl.basis_size), env_enl_op["H"]) +
+                self.H2(sys_enl_op["conn_b"], env_enl_op["conn_b"]))
+
 def rotate_and_truncate(operator, transformation_matrix):
     """Transforms the operator to the new (possibly truncated) basis given by
     `transformation_matrix`.
