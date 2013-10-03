@@ -10,15 +10,14 @@
 # provides consistency between python2 and python3.
 from __future__ import print_function, division  # requires Python >= 2.6
 
-# numpy and scipy imports
+from collections import namedtuple
+
 import numpy as np
 from scipy.sparse import kron, identity, lil_matrix
 from scipy.sparse.linalg import eigsh  # Lanczos routine from ARPACK
 
 # We will use python's "namedtuple" to represent the Block and EnlargedBlock
 # objects
-from collections import namedtuple
-
 Block = namedtuple("Block", ["length", "basis_size", "operator_dict", "basis_sector_array"])
 EnlargedBlock = namedtuple("EnlargedBlock", ["length", "basis_size", "operator_dict", "basis_sector_array"])
 
