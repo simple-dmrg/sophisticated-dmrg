@@ -204,7 +204,7 @@ def index_map(array):
         d.setdefault(value, []).append(index)
     return d
 
-def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
+def single_dmrg_step(model, sys, env, m, target_sector=None, psi0_guess=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -232,21 +232,21 @@ def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
     # Construct the full superblock Hamiltonian.
     superblock_hamiltonian = model.construct_superblock_hamiltonian(sys_enl, env_enl)
 
-    if target_Sz is not None:
+    if target_sector is not None:
         # Build up a "restricted" basis of states in the target sector and
         # reconstruct the superblock Hamiltonian in that sector.
         sector_indices = {} # will contain indices of the new (restricted) basis
                             # for which the enlarged system is in a given sector
         restricted_basis_indices = []  # will contain indices of the old (full) basis, which we are mapping to
-        for sys_enl_Sz, sys_enl_basis_states in sys_enl_basis_by_sector.items():
-            sector_indices[sys_enl_Sz] = []
-            env_enl_Sz = target_Sz - sys_enl_Sz
-            if env_enl_Sz in env_enl_basis_by_sector:
+        for sys_enl_sector, sys_enl_basis_states in sys_enl_basis_by_sector.items():
+            sector_indices[sys_enl_sector] = []
+            env_enl_sector = target_sector - sys_enl_sector
+            if env_enl_sector in env_enl_basis_by_sector:
                 for i in sys_enl_basis_states:
                     i_offset = m_env_enl * i  # considers the tensor product structure of the superblock basis
-                    for j in env_enl_basis_by_sector[env_enl_Sz]:
+                    for j in env_enl_basis_by_sector[env_enl_sector]:
                         current_index = len(restricted_basis_indices)  # about-to-be-added index of restricted_basis_indices
-                        sector_indices[sys_enl_Sz].append(current_index)
+                        sector_indices[sys_enl_sector].append(current_index)
                         restricted_basis_indices.append(i_offset + j)
 
         restricted_superblock_hamiltonian = superblock_hamiltonian[:, restricted_basis_indices][restricted_basis_indices, :]
@@ -262,10 +262,10 @@ def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
         # in the enlarged system.
         sector_indices = {}
         restricted_basis_indices = range(m_sys_enl * m_env_enl)
-        for sys_enl_Sz, sys_enl_basis_states in sys_enl_basis_by_sector.items():
-            sector_indices[sys_enl_Sz] = [] # m_env_enl
+        for sys_enl_sector, sys_enl_basis_states in sys_enl_basis_by_sector.items():
+            sector_indices[sys_enl_sector] = [] # m_env_enl
             for i in sys_enl_basis_states:
-                sector_indices[sys_enl_Sz].extend(range(m_env_enl * i, m_env_enl * (i + 1)))
+                sector_indices[sys_enl_sector].extend(range(m_env_enl * i, m_env_enl * (i + 1)))
 
         restricted_superblock_hamiltonian = superblock_hamiltonian
         restricted_psi0_guess = psi0_guess
@@ -277,24 +277,24 @@ def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
     # Construct each block of the reduced density matrix of the system by
     # tracing out the environment
     rho_block_dict = {}
-    for sys_enl_Sz, indices in sector_indices.items():
+    for sys_enl_sector, indices in sector_indices.items():
         if indices: # if indices is nonempty
             psi0_sector = restricted_psi0[indices, :]
             # We want to make the (sys, env) indices correspond to (row,
             # column) of a matrix, respectively.  Since the environment
             # (column) index updates most quickly in our Kronecker product
             # structure, psi0_sector is thus row-major ("C style").
-            psi0_sector = psi0_sector.reshape([len(sys_enl_basis_by_sector[sys_enl_Sz]), -1], order="C")
-            rho_block_dict[sys_enl_Sz] = np.dot(psi0_sector, psi0_sector.conjugate().transpose())
+            psi0_sector = psi0_sector.reshape([len(sys_enl_basis_by_sector[sys_enl_sector]), -1], order="C")
+            rho_block_dict[sys_enl_sector] = np.dot(psi0_sector, psi0_sector.conjugate().transpose())
 
     # Diagonalize each block of the reduced density matrix and sort the
     # eigenvectors by eigenvalue.
     possible_eigenstates = []
-    for Sz_sector, rho_block in rho_block_dict.items():
+    for sector, rho_block in rho_block_dict.items():
         evals, evecs = np.linalg.eigh(rho_block)
-        current_sector_basis = sys_enl_basis_by_sector[Sz_sector]
+        current_sector_basis = sys_enl_basis_by_sector[sector]
         for eval, evec in zip(evals, evecs.transpose()):
-            possible_eigenstates.append((eval, evec, Sz_sector, current_sector_basis))
+            possible_eigenstates.append((eval, evec, sector, current_sector_basis))
     possible_eigenstates.sort(reverse=True, key=lambda x: x[0])  # largest eigenvalue first
 
     # Build the transformation matrix from the `m` overall most significant
@@ -304,10 +304,10 @@ def single_dmrg_step(model, sys, env, m, target_Sz=None, psi0_guess=None):
     transformation_matrix = lil_matrix((sys_enl.basis_size, my_m), dtype=model.dtype)
     new_sector_array = np.zeros((my_m,), model.dtype)  # lists the sector of each
                                                        # element of the new/truncated basis
-    for i, (eval, evec, Sz_sector, current_sector_basis) in enumerate(possible_eigenstates[:my_m]):
+    for i, (eval, evec, sector, current_sector_basis) in enumerate(possible_eigenstates[:my_m]):
         for j, v in zip(current_sector_basis, evec):
             transformation_matrix[j, i] = v
-        new_sector_array[i] = Sz_sector
+        new_sector_array[i] = sector
     # Convert the transformation matrix to a more efficient internal
     # representation.  `lil_matrix` is good for constructing a sparse matrix
     # efficiently, but `csr_matrix` is better for performing quick
@@ -352,21 +352,21 @@ def graphic(sys_block, env_block, sys_label="l"):
         graphic = graphic[::-1]
     return graphic
 
-def infinite_system_algorithm(model, L, m, target_Sz):
+def infinite_system_algorithm(model, L, m, target_sector):
     block = model.initial_block()
     # Repeatedly enlarge the system by performing a single DMRG step, using a
     # reflection of the current block as the environment.
     while 2 * block.length < L:
         current_L = 2 * block.length + 2  # current superblock length
-        if target_Sz is not None:
-            current_target_Sz = int(target_Sz) * current_L // L
+        if target_sector is not None:
+            current_target_sector = int(target_sector) * current_L // L
         else:
-            current_target_Sz = None
+            current_target_sector = None
         print("L =", current_L)
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, target_Sz=current_target_Sz)
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, target_sector=current_target_sector)
         print("E/L =", energy / current_L)
 
-def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_Sz):
+def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
     assert L % 2 == 0  # require that L is an even number
 
     # To keep things simple, these dictionaries are not actually saved to disk,
@@ -385,11 +385,11 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_Sz):
         # Perform a single DMRG step and save the new Block to "disk"
         print(graphic(block, block))
         current_L = 2 * block.length + 2  # current superblock length
-        if target_Sz is not None:
-            current_target_Sz = int(target_Sz) * current_L // L
+        if target_sector is not None:
+            current_target_sector = int(target_sector) * current_L // L
         else:
-            current_target_Sz = None
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, target_Sz=current_target_Sz)
+            current_target_sector = None
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, target_sector=current_target_sector)
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
         block_disk["r", block.length] = block
@@ -453,7 +453,7 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_Sz):
 
             # Perform a single DMRG step.
             print(graphic(sys_block, env_block, sys_label))
-            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, target_Sz=target_Sz, psi0_guess=psi0_guess)
+            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, target_sector=target_sector, psi0_guess=psi0_guess)
 
             print("E/L =", energy / L)
 
@@ -470,5 +470,5 @@ if __name__ == "__main__":
 
     model = HeisenbergChainXXZ(J=1., Jz=1.)
 
-    #infinite_system_algorithm(model, L=100, m=20, target_Sz=0)
-    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_Sz=0)
+    #infinite_system_algorithm(model, L=100, m=20, target_sector=0)
+    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=0)
