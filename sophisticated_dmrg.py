@@ -16,6 +16,9 @@ import numpy as np
 from scipy.sparse import kron, identity, lil_matrix
 from scipy.sparse.linalg import eigsh  # Lanczos routine from ARPACK
 
+open_bc = 0
+periodic_bc = 1
+
 # We will use python's "namedtuple" to represent the Block and EnlargedBlock
 # objects
 Block = namedtuple("Block", ["length", "basis_size", "operator_dict", "basis_sector_array"])
@@ -46,9 +49,10 @@ class HeisenbergChainXXZ(object):
 
     H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
 
-    def __init__(self, J=1., Jz=1.):
+    def __init__(self, J=1., Jz=1., boundary_condition=open_bc):
         self.J = J
         self.Jz = Jz
+        self.boundary_condition = boundary_condition
 
     def H2(self, Sz1, Sp1, Sz2, Sp2):  # two-site part of H
         """Given the operators S^z and S^+ on two sites in different Hilbert spaces
@@ -62,16 +66,31 @@ class HeisenbergChainXXZ(object):
         )
 
     def initial_block(self):
-        # conn refers to the connection operator, that is, the operator on the edge of
-        # the block, on the interior of the chain.  We need to be able to represent S^z
-        # and S^+ on that site in the current basis in order to grow the chain.
-        return Block(length=1, basis_size=self.d, operator_dict={
-            "H": self.H1,
-            "conn_Sz": self.Sz1,
-            "conn_Sp": self.Sp1,
-        }, basis_sector_array=self.single_site_sectors)
+        if self.boundary_condition == open_bc:
+            # conn refers to the connection operator, that is, the operator on the
+            # site that was most recently added to the block.  We need to be able
+            # to represent S^z and S^+ on that site in the current basis in order
+            # to grow the chain.
+            operator_dict = {
+                "H": self.H1,
+                "conn_Sz": self.Sz1,
+                "conn_Sp": self.Sp1,
+            }
+        else:
+            # Since the PBC block needs to be able to grow in both directions,
+            # we must be able to represent the relevant operators on both the
+            # left and right sites of the chain.
+            operator_dict = {
+                "H": self.H1,
+                "l_Sz": self.Sz1,
+                "l_Sp": self.Sp1,
+                "r_Sz": self.Sz1,
+                "r_Sp": self.Sp1,
+            }
+        return Block(length=1, basis_size=self.d, operator_dict=operator_dict,
+                     basis_sector_array=self.single_site_sectors)
 
-    def enlarge_block(self, block):
+    def enlarge_block(self, block, direction=None):
         """This function enlarges the provided Block by a single site, returning an
         EnlargedBlock.
         """
@@ -83,11 +102,36 @@ class HeisenbergChainXXZ(object):
         # `kron` uses the tensor product convention making blocks of the second
         # array scaled by the first.  As such, we adopt this convention for
         # Kronecker products throughout the code.
-        enlarged_operator_dict = {
-            "H": kron(o["H"], identity(self.d)) + kron(identity(mblock), self.H1) + self.H2(o["conn_Sz"], o["conn_Sp"], self.Sz1, self.Sp1),
-            "conn_Sz": kron(identity(mblock), self.Sz1),
-            "conn_Sp": kron(identity(mblock), self.Sp1),
-        }
+        if self.boundary_condition == open_bc:
+            enlarged_operator_dict = {
+                "H": kron(o["H"], identity(self.d)) +
+                     kron(identity(mblock), self.H1) +
+                     self.H2(o["conn_Sz"], o["conn_Sp"], self.Sz1, self.Sp1),
+                "conn_Sz": kron(identity(mblock), self.Sz1),
+                "conn_Sp": kron(identity(mblock), self.Sp1),
+            }
+        else:
+            assert direction in ("l", "r")
+            if direction == "l":
+                enlarged_operator_dict = {
+                    "H": kron(o["H"], identity(self.d)) +
+                         kron(identity(mblock), self.H1) +
+                         self.H2(o["l_Sz"], o["l_Sp"], self.Sz1, self.Sp1),
+                    "l_Sz": kron(identity(mblock), self.Sz1),
+                    "l_Sp": kron(identity(mblock), self.Sp1),
+                    "r_Sz": kron(o["r_Sz"], identity(self.d)),
+                    "r_Sp": kron(o["r_Sp"], identity(self.d)),
+                }
+            else:
+                enlarged_operator_dict = {
+                    "H": kron(o["H"], identity(self.d)) +
+                         kron(identity(mblock), self.H1) +
+                         self.H2(o["r_Sz"], o["r_Sp"], self.Sz1, self.Sp1),
+                    "l_Sz": kron(o["l_Sz"], identity(self.d)),
+                    "l_Sp": kron(o["l_Sp"], identity(self.d)),
+                    "r_Sz": kron(identity(mblock), self.Sz1),
+                    "r_Sp": kron(identity(mblock), self.Sp1),
+                }
 
         # This array keeps track of which sector each element of the new basis is
         # in.  `np.add.outer()` creates a matrix that adds each element of the
@@ -103,17 +147,26 @@ class HeisenbergChainXXZ(object):
     def construct_superblock_hamiltonian(self, sys_enl, env_enl):
         sys_enl_op = sys_enl.operator_dict
         env_enl_op = env_enl.operator_dict
+        if self.boundary_condition == open_bc:
+            # L**R
+            H_int = self.H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"])
+        else:
+            assert self.boundary_condition == periodic_bc
+            # L*R*
+            H_int = (self.H2(sys_enl_op["r_Sz"], sys_enl_op["r_Sp"], env_enl_op["l_Sz"], env_enl_op["l_Sp"]) +
+                     self.H2(sys_enl_op["l_Sz"], sys_enl_op["l_Sp"], env_enl_op["r_Sz"], env_enl_op["r_Sp"]))
         return (kron(sys_enl_op["H"], identity(env_enl.basis_size)) +
                 kron(identity(sys_enl.basis_size), env_enl_op["H"]) +
-                self.H2(sys_enl_op["conn_Sz"], sys_enl_op["conn_Sp"], env_enl_op["conn_Sz"], env_enl_op["conn_Sp"]))
+                H_int)
 
 # Model-specific code for the Bose-Hubbard chain
 class BoseHubbardChain(object):
     dtype = 'd'  # double-precision floating point
 
-    def __init__(self, d, U=0., mu=0., t=1.):
+    def __init__(self, d, U=0., mu=0., t=1., boundary_condition=open_bc):
         self.t = t  # hopping
         self.U = U  # on-site interaction
+        self.boundary_condition = boundary_condition
         assert d >= 2
         self.d = d  # single-site basis size (enforces a maximum of d-1 particles on a site)
         ndiag = np.array(range(d), self.dtype)
@@ -124,15 +177,29 @@ class BoseHubbardChain(object):
         self.H1 = np.diag(.5 * U * ndiag * (ndiag - 1) - mu * ndiag)  # single-site term of H
 
     def initial_block(self):
-        # conn refers to the connection operator, that is, the operator on the
-        # edge of the block, on the interior of the chain.  We need to be able
-        # to represent b on that site in the current basis in order to grow the
-        # chain.
-        return Block(length=1, basis_size=self.d, operator_dict={
-            "H": self.H1,
-            "conn_n": self.n_op,
-            "conn_b": self.b_op,
-        }, basis_sector_array=self.single_site_sectors)
+        if self.boundary_condition == open_bc:
+            # conn refers to the connection operator, that is, the operator on the
+            # site that was most recently added to the block.  We need to be able
+            # to represent S^z and S^+ on that site in the current basis in order
+            # to grow the chain.
+            operator_dict = {
+                "H": self.H1,
+                "conn_n": self.n_op,
+                "conn_b": self.b_op,
+            }
+        else:
+            # Since the PBC block needs to be able to grow in both directions,
+            # we must be able to represent the relevant operators on both the
+            # left and right sites of the chain.
+            operator_dict = {
+                "H": self.H1,
+                "l_n": self.n_op,
+                "l_b": self.b_op,
+                "r_n": self.n_op,
+                "r_b": self.b_op,
+             }
+        return Block(length=1, basis_size=self.d, operator_dict=operator_dict,
+                     basis_sector_array=self.single_site_sectors)
 
     def H2(self, b1, b2):  # two-site part of H
         """Given the operator b on two sites in different Hilbert spaces
@@ -143,7 +210,7 @@ class BoseHubbardChain(object):
         return -self.t * (kron(b1, b2.conjugate().transpose()) +
                           kron(b1.conjugate().transpose(), b2))
 
-    def enlarge_block(self, block):
+    def enlarge_block(self, block, direction=None):
         """This function enlarges the provided Block by a single site, returning an
         EnlargedBlock.
         """
@@ -155,11 +222,36 @@ class BoseHubbardChain(object):
         # `kron` uses the tensor product convention making blocks of the second
         # array scaled by the first.  As such, we adopt this convention for
         # Kronecker products throughout the code.
-        enlarged_operator_dict = {
-            "H": kron(o["H"], identity(self.d)) + kron(identity(mblock), self.H1) + self.H2(o["conn_b"], self.b_op),
-            "conn_n": kron(identity(mblock), self.n_op),
-            "conn_b": kron(identity(mblock), self.b_op),
-        }
+        if self.boundary_condition == open_bc:
+            enlarged_operator_dict = {
+                "H": kron(o["H"], identity(self.d)) +
+                     kron(identity(mblock), self.H1) +
+                     self.H2(o["conn_b"], self.b_op),
+                "conn_n": kron(identity(mblock), self.n_op),
+                "conn_b": kron(identity(mblock), self.b_op),
+            }
+        else:
+            assert direction in ("l", "r")
+            if direction == "l":
+                enlarged_operator_dict = {
+                    "H": kron(o["H"], identity(self.d)) +
+                         kron(identity(mblock), self.H1) +
+                         self.H2(o["l_b"], self.b_op),
+                    "l_n": kron(identity(mblock), self.n_op),
+                    "l_b": kron(identity(mblock), self.b_op),
+                    "r_n": kron(o["r_n"], identity(self.d)),
+                    "r_b": kron(o["r_b"], identity(self.d)),
+                }
+            else:
+                enlarged_operator_dict = {
+                    "H": kron(o["H"], identity(self.d)) +
+                         kron(identity(mblock), self.H1) +
+                         self.H2(o["r_b"], self.b_op),
+                    "l_n": kron(o["l_n"], identity(self.d)),
+                    "l_b": kron(o["l_b"], identity(self.d)),
+                    "r_n": kron(identity(mblock), self.n_op),
+                    "r_b": kron(identity(mblock), self.b_op),
+                }
 
         # This array keeps track of which sector each element of the new basis is
         # in.  `np.add.outer()` creates a matrix that adds each element of the
@@ -175,9 +267,17 @@ class BoseHubbardChain(object):
     def construct_superblock_hamiltonian(self, sys_enl, env_enl):
         sys_enl_op = sys_enl.operator_dict
         env_enl_op = env_enl.operator_dict
+        if self.boundary_condition == open_bc:
+            # L**R
+            H_int = self.H2(sys_enl_op["conn_b"], env_enl_op["conn_b"])
+        else:
+            assert self.boundary_condition == periodic_bc
+            # L*R*
+            H_int = (self.H2(sys_enl_op["r_b"], env_enl_op["l_b"]) +
+                     self.H2(sys_enl_op["l_b"], env_enl_op["r_b"]))
         return (kron(sys_enl_op["H"], identity(env_enl.basis_size)) +
                 kron(identity(sys_enl.basis_size), env_enl_op["H"]) +
-                self.H2(sys_enl_op["conn_b"], env_enl_op["conn_b"]))
+                H_int)
 
 def rotate_and_truncate(operator, transformation_matrix):
     """Transforms the operator to the new (possibly truncated) basis given by
@@ -204,7 +304,7 @@ def index_map(array):
         d.setdefault(value, []).append(index)
     return d
 
-def single_dmrg_step(model, sys, env, m, target_sector=None, psi0_guess=None):
+def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi0_guess=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -214,13 +314,13 @@ def single_dmrg_step(model, sys, env, m, target_sector=None, psi0_guess=None):
     assert is_valid_block(env)
 
     # Enlarge each block by a single site.
-    sys_enl = model.enlarge_block(sys)
+    sys_enl = model.enlarge_block(sys, direction)
     sys_enl_basis_by_sector = index_map(sys_enl.basis_sector_array)
     if sys is env:  # no need to recalculate a second time
         env_enl = sys_enl
         env_enl_basis_by_sector = sys_enl_basis_by_sector
     else:
-        env_enl = model.enlarge_block(env)
+        env_enl = model.enlarge_block(env, direction)
         env_enl_basis_by_sector = index_map(env_enl.basis_sector_array)
 
     assert is_valid_enlarged_block(sys_enl)
@@ -339,18 +439,19 @@ def single_dmrg_step(model, sys, env, m, target_sector=None, psi0_guess=None):
 
     return newblock, energy, transformation_matrix, psi0
 
-def graphic(sys_block, env_block, sys_label="l"):
+def graphic(boundary_condition, sys_block, env_block, sys_label="l"):
     """Returns a graphical representation of the DMRG step we are about to
     perform, using '=' to represent the system sites, '-' to represent the
     environment sites, and '**' to represent the two intermediate sites.
     """
-    assert sys_label in ("l", "r")
-    graphic = ("=" * sys_block.length) + "**" + ("-" * env_block.length)
-    if sys_label == "r":
-        # The system should be on the right and the environment should be on
-        # the left, so reverse the graphic.
-        graphic = graphic[::-1]
-    return graphic
+    order = {"l": 1, "r": -1}[sys_label]
+    l_symbol, r_symbol = ("=", "-")[::order]
+    l_length, r_length = (sys_block.length, env_block.length)[::order]
+
+    if boundary_condition == open_bc:
+        return (l_symbol * l_length) + "**" + (r_symbol * r_length)
+    else:
+        return (l_symbol * l_length) + "*" + (r_symbol * r_length) + "*"
 
 def infinite_system_algorithm(model, L, m, target_sector):
     block = model.initial_block()
@@ -363,7 +464,7 @@ def infinite_system_algorithm(model, L, m, target_sector):
         else:
             current_target_sector = None
         print("L =", current_L)
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, target_sector=current_target_sector)
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, direction="r", target_sector=current_target_sector)
         print("E/L =", energy / current_L)
 
 def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
@@ -383,13 +484,13 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
     block_disk["r", block.length] = block
     while 2 * block.length < L:
         # Perform a single DMRG step and save the new Block to "disk"
-        print(graphic(block, block))
+        print(graphic(model.boundary_condition, block, block))
         current_L = 2 * block.length + 2  # current superblock length
         if target_sector is not None:
             current_target_sector = int(target_sector) * current_L // L
         else:
             current_target_sector = None
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, target_sector=current_target_sector)
+        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
         block_disk["r", block.length] = block
@@ -452,8 +553,8 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
                 psi0_guess = env_trmat.dot(psi0_d.transpose()).transpose().reshape((-1, 1))
 
             # Perform a single DMRG step.
-            print(graphic(sys_block, env_block, sys_label))
-            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, target_sector=target_sector, psi0_guess=psi0_guess)
+            print(graphic(model.boundary_condition, sys_block, env_block, sys_label))
+            sys_block, energy, transformation_matrix, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, direction=env_label, target_sector=target_sector, psi0_guess=psi0_guess)
 
             print("E/L =", energy / L)
 
