@@ -528,29 +528,39 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
                 # Note that this does *not* correspond to left-to-right order
                 # on the chain.
                 #
+                # Also keep in mind that `trmat.shape` corresponds to
+                # (old extended block size, new truncated block size).
+                #
                 # First we reshape the psi0 vector into a matrix with rows
                 # corresponding to the enlarged system basis and columns
                 # corresponding to the enlarged environment basis.
-                psi0_a = psi0.reshape((-1, env_trmat.shape[1] * model.d), order="C")
+                psi0 = psi0.reshape((-1, env_trmat.shape[1] * model.d), order="C")
                 # Now we transform the enlarged system block into a system
-                # block, so that psi0_b looks like ====*-- (with only one
+                # block, so that psi0 looks like ====*-- (with only one
                 # intermediate site).
-                psi0_b = sys_trmat.conjugate().transpose().dot(psi0_a)
+                psi0 = sys_trmat.conjugate().transpose().dot(psi0)
                 # At the moment, the tensor product goes as (sys_block,
                 # env_enl_block) == (sys_block, env_block, extra_site), but we
                 # need it to look like (sys_enl_block, env_block) ==
                 # (sys_block, extra_site, env_block).  In other words, the
                 # single intermediate site should now be part of a new enlarged
                 # system, not part of the enlarged environment.
-                psi0_c = psi0_b.reshape((-1, env_trmat.shape[1], model.d), order="C").transpose(0, 2, 1)
+                psi0 = psi0.reshape((-1, env_trmat.shape[1], model.d), order="C").transpose(0, 2, 1)
                 # Now we reshape the psi0 vector into a matrix with rows
                 # corresponding to the enlarged system and columns
                 # corresponding to the environment block.
-                psi0_d = psi0_c.reshape((-1, env_trmat.shape[1]), order="C")
+                psi0 = psi0.reshape((-1, env_trmat.shape[1]), order="C")
                 # Finally, we transform the environment block into the basis of
                 # an enlarged block the so that psi0_guess has the tensor
                 # product structure of ====**--.
-                psi0_guess = env_trmat.dot(psi0_d.transpose()).transpose().reshape((-1, 1))
+                psi0 = env_trmat.dot(psi0.transpose()).transpose()
+                if model.boundary_condition != open_bc:
+                    # All of the above logic still holds, but the bare sites
+                    # are mixed up with each other, so we need to swap their
+                    # positions in the tensor product space.
+                    psi0 = psi0.reshape((sys_trmat.shape[1], model.d, env_trmat.shape[0] // model.d, model.d), order="C").transpose(0, 3, 2, 1)
+                # Reshape into a column vector
+                psi0_guess = psi0.reshape((-1, 1), order="C")
 
             # Perform a single DMRG step.
             print(graphic(model.boundary_condition, sys_block, env_block, sys_label))
