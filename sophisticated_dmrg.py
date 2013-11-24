@@ -560,10 +560,9 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
                 # We've come to the end of the chain, so we reverse course.
                 sys_block, env_block = env_block, sys_block
                 sys_label, env_label = env_label, sys_label
-                sys_trmat, env_trmat = env_trmat, sys_trmat
                 if psi0g is not None:
                     # Re-order the psi0_guess based on the new sys, env labels.
-                    psi0g = psi0g.reshape((env_trmat.shape[1] * model.d, sys_trmat.shape[0]), order="C").transpose()
+                    psi0g = psi0g.reshape((sys_trmat.shape[1] * model.d, env_trmat.shape[0]), order="C").transpose()
 
             if psi0g is not None:
                 # Reshape into a column vector
