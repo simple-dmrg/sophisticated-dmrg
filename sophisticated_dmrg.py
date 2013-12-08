@@ -453,7 +453,7 @@ def graphic(boundary_condition, sys_block, env_block, sys_label="l"):
     else:
         return (l_symbol * l_length) + "*" + (r_symbol * r_length) + "*"
 
-def infinite_system_algorithm(model, L, m, target_sector):
+def infinite_system_algorithm(model, L, m, target_sector=None):
     block = model.initial_block()
     # Repeatedly enlarge the system by performing a single DMRG step, using a
     # reflection of the current block as the environment.
@@ -467,7 +467,7 @@ def infinite_system_algorithm(model, L, m, target_sector):
         block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, direction="r", target_sector=current_target_sector)
         print("E/L =", energy / current_L)
 
-def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
+def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None):
     assert L % 2 == 0  # require that L is an even number
 
     # To keep things simple, these dictionaries are not actually saved to disk,
