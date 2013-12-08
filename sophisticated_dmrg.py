@@ -37,7 +37,7 @@ def is_valid_block(block):
 is_valid_enlarged_block = is_valid_block
 
 # Model-specific code for the Heisenberg XXZ chain
-class HeisenbergChainXXZ(object):
+class HeisenbergXXZChain(object):
     dtype = 'd'  # double-precision floating point
     d = 2  # single-site basis size
 
@@ -585,7 +585,8 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector):
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
-    model = HeisenbergChainXXZ(J=1., Jz=1.)
+    #model = BoseHubbardChain(d=5, U=3., boundary_condition=periodic_bc)
+    model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=open_bc)
 
     #infinite_system_algorithm(model, L=100, m=20, target_sector=0)
-    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=0)
+    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=None)
