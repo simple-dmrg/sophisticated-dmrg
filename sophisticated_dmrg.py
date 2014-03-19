@@ -465,6 +465,7 @@ def infinite_system_algorithm(model, L, m, target_sector=None):
     while 2 * block.length < L:
         current_L = 2 * block.length + 2  # current superblock length
         if target_sector is not None:
+            # assumes the value is extensive
             current_target_sector = int(target_sector) * current_L // L
         else:
             current_target_sector = None
@@ -508,6 +509,7 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
     sys_block = block; del block  # rename the variable
     sys_trmat = None
     for m in m_sweep_list:
+        print("Performing sweep with m =", m)
         while True:
             # Load the appropriate environment from "disk"
             env_block = block_disk[env_label, L - sys_block.length - 2]
@@ -578,6 +580,8 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
             sys_block, energy, sys_trmat, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, direction=env_label, target_sector=target_sector, psi0_guess=psi0g)
 
             print("E/L =", energy / L)
+            print("E   =", energy)
+            sys.stdout.flush()
 
             # Save the block and transformation matrix from this step to disk.
             block_disk[sys_label, sys_block.length] = sys_block
