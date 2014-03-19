@@ -379,9 +379,13 @@ def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi
         restricted_superblock_hamiltonian = superblock_hamiltonian
         restricted_psi0_guess = psi0_guess
 
-    # Call ARPACK to find the superblock ground state.  ("SA" means find the
-    # "smallest in amplitude" eigenvalue.)
-    (energy,), restricted_psi0 = eigsh(restricted_superblock_hamiltonian, k=1, which="SA", v0=restricted_psi0_guess)
+    if restricted_superblock_hamiltonian.shape == (1, 1):
+        restricted_psi0 = np.array([[1.]], dtype=model.dtype)
+        energy = restricted_superblock_hamiltonian[0, 0]
+    else:
+        # Call ARPACK to find the superblock ground state.  ("SA" means find the
+        # "smallest in amplitude" eigenvalue.)
+        (energy,), restricted_psi0 = eigsh(restricted_superblock_hamiltonian, k=1, which="SA", v0=restricted_psi0_guess)
 
     # Construct each block of the reduced density matrix of the system by
     # tracing out the environment
