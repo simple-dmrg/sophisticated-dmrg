@@ -11,6 +11,7 @@
 from __future__ import print_function, division  # requires Python >= 2.6
 
 from collections import namedtuple
+from itertools import chain
 
 import numpy as np
 from scipy.sparse import kron, identity, lil_matrix
@@ -43,6 +44,8 @@ class HeisenbergXXZChain(object):
 
     Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype)  # single-site S^z
     Sp1 = np.array([[0, 1], [0, 0]], dtype)  # single-site S^+
+
+    sso = {"Sz": Sz1, "Sp": Sp1}  # single-site operators
 
     # S^z sectors corresponding to the single site basis elements
     single_site_sectors = np.array([0.5, -0.5])
@@ -177,6 +180,7 @@ class BoseHubbardChain(object):
         self.b_op = np.diag(np.sqrt(ndiag[1:]), k=1)  # k=1 => upper diagonal
         assert np.sum(np.abs(self.n_op - self.b_op.transpose().dot(self.b_op))) < 1e-4
         self.H1 = np.diag(.5 * U * ndiag * (ndiag - 1) - mu * ndiag)  # single-site term of H
+        self.sso = {"n": self.n_op, "b": self.b_op}  # single-site operators
 
     def initial_block(self):
         if self.boundary_condition == open_bc:
@@ -437,12 +441,13 @@ def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi
     psi0 = np.zeros([m_sys_enl * m_env_enl, 1], model.dtype)
     for i, z in enumerate(restricted_basis_indices):
         psi0[z, 0] = restricted_psi0[i, 0]
+    assert np.all(psi0[restricted_basis_indices] == restricted_psi0)
     if psi0_guess is not None:
         overlap = np.absolute(np.dot(psi0_guess.conjugate().transpose(), psi0).item())
         overlap /= np.linalg.norm(psi0_guess) * np.linalg.norm(psi0)  # normalize it
         print("overlap |<psi0_guess|psi0>| =", overlap)
 
-    return newblock, energy, transformation_matrix, psi0
+    return newblock, energy, transformation_matrix, psi0, restricted_basis_indices
 
 def graphic(boundary_condition, sys_block, env_block, sys_label="l"):
     """Returns a graphical representation of the DMRG step we are about to
@@ -470,11 +475,12 @@ def infinite_system_algorithm(model, L, m, target_sector=None):
         else:
             current_target_sector = None
         print("L =", current_L)
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m, direction="r", target_sector=current_target_sector)
+        block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m, direction="r", target_sector=current_target_sector)
         print("E/L =", energy / current_L)
 
-def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None):
-    assert L % 2 == 0  # require that L is an even number
+def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None, measurements=None):
+    if not (L > 0 and L % 2 == 0):
+        raise ValueError("System length `L` must be an even, positive number.")
 
     # To keep things simple, these dictionaries are not actually saved to disk,
     # but they are used to represent persistent storage.
@@ -496,7 +502,7 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
             current_target_sector = int(target_sector) * current_L // L
         else:
             current_target_sector = None
-        block, energy, transformation_matrix, psi0 = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
+        block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
         block_disk["r", block.length] = block
@@ -577,7 +583,7 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
 
             # Perform a single DMRG step.
             print(graphic(model.boundary_condition, sys_block, env_block, sys_label))
-            sys_block, energy, sys_trmat, psi0 = single_dmrg_step(model, sys_block, env_block, m=m, direction=env_label, target_sector=target_sector, psi0_guess=psi0g)
+            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=env_label, target_sector=target_sector, psi0_guess=psi0g)
 
             print("E/L =", energy / L)
             print("E   =", energy)
@@ -590,6 +596,200 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
             # Check whether we just completed a full sweep.
             if sys_label == "l" and 2 * sys_block.length == L:
                 break  # escape from the "while True" loop
+
+    if measurements is None:
+        return
+
+    if not m_sweep_list:
+        raise RuntimeError("You must perform some sweeps in the finite system algorithm if you wish to make any measurements.")
+
+    # figure out which sites are where
+    LEFT_BLOCK, LEFT_SITE, RIGHT_BLOCK, RIGHT_SITE = 0, 1, 2, 3
+    if model.boundary_condition == open_bc:
+        sites_by_area = (
+            range(0, L // 2 - 1),  # left block
+            [L // 2 - 1],  # left bare site
+            range(L // 2 + 1, L)[::-1],  # right block
+            [L // 2],  # right bare site
+        )
+    else:
+        # PBC algorithm
+        sites_by_area = (
+            range(0, L // 2 - 1),  # left block
+            [L // 2 - 1],  # left bare site
+            range(L // 2, L - 1)[::-1],  # right block
+            [L - 1],  # right bare site
+        )
+    assert sum([len(z) for z in sites_by_area]) == L
+    assert set(chain.from_iterable(sites_by_area)) == set(range(L))
+
+    # from the above info, make a lookup table of what class each site is in so
+    # we can look it up easily.
+    site_class = [None] * L
+    for i, heh in enumerate(sites_by_area):
+        for site_index in heh:
+            site_class[site_index] = i
+    assert None not in site_class
+
+    def canonicalize(meas_desc):
+        # This performs a stable sort on operators by site (so we are assuming
+        # that operators on different sites commute).  By doing this, we will
+        # be able to combine operators ASAP as a block grows
+        return sorted(meas_desc, key=lambda x: x[0])
+
+    InnerObject = namedtuple("InnerObject", ["site_indices", "operator_names", "area"])
+
+    class OuterObject(object):
+        def __init__(self, site_indices, operator_names, area, built=False):
+            self.obj = InnerObject(site_indices, operator_names, area)
+            self.built = built
+
+    # first make a list of which operators we need to consider on each site.
+    # This way we won't have to look at every single operator each time we add
+    # a site.
+    #
+    # we are doing at least a few others things here, too...
+    #
+    # We are also checking that each operator and site index is valid.  And we
+    # are copying the measurements so that we can modify them.
+    #
+    # We also make note of which of the four blocks each site is in
+    measurements_by_site = {}
+    processed_measurements = []
+    for meas_desc in measurements:
+        site_indices = set()
+        for site_index, operator_name in meas_desc:
+            if operator_name not in model.sso:
+                raise RuntimeError("Unknown operator: %s" % operator_name)
+            if site_index not in range(L):
+                raise RuntimeError("Unknown site index: %r (L = %r)" % (site_index, L))
+            site_indices.add(site_index)
+        measurement = [OuterObject((site_index,), (operator_name,),
+                                   site_class[site_index], False)
+                       for site_index, operator_name in canonicalize(meas_desc)]
+        processed_measurements.append(measurement)
+        for site_index in site_indices:
+            measurements_by_site.setdefault(site_index, []).append(measurement)
+    assert len(measurements) == len(processed_measurements)
+
+    class Yay(object):
+        def __init__(self, m):
+            self.m = m
+            self.refcnt = 1
+
+    def handle_operators_on_site(site_index, area, some_dict, msize):
+        for measurement in measurements_by_site[site_index]:
+            # first replace each operator on this site by an actual operator
+            for i, obj in enumerate(measurement):
+                if obj.obj.site_indices[0] != site_index:
+                    continue
+                assert obj.built is False
+                try:
+                    some_dict[obj.obj].refcnt += 1
+                except KeyError:
+                    assert len(obj.obj.operator_names) == 1
+                    sso = model.sso[obj.obj.operator_names[0]]
+                    mat = kron(identity(msize), sso)
+                    some_dict[obj.obj] = Yay(mat)
+                obj.built = True
+
+            # second, combine all operators that are possible to combine (and decref them in the process)
+            for i in range(len(measurement) - 1)[::-1]:
+                # attempt to combine i and i+1
+                if measurement[i].built and measurement[i + 1].built and measurement[i].obj.area == measurement[i + 1].obj.area == area:
+                    c1, c2 = measurement[i], measurement[i + 1]
+
+                    o1 = some_dict[c1.obj]
+                    o1.refcnt -= 1
+                    if o1.refcnt == 0:
+                        del some_dict[c1.obj]
+
+                    o2 = some_dict[c2.obj]
+                    o2.refcnt -= 1
+                    if o2.refcnt == 0:
+                        del some_dict[c2.obj]
+
+                    c3 = OuterObject(tuple(chain(c1.obj[0], c2.obj[0])),
+                                     tuple(chain(c1.obj[1], c2.obj[1])),
+                                     area, True)
+                    try:
+                        some_dict[c3.obj].refcnt += 1
+                    except KeyError:
+                        some_dict[c3.obj] = Yay(o1.m.dot(o2.m))
+
+                    measurement.pop(i + 1)
+                    measurement[i] = c3
+
+    g_some_dict = ({}, {}, {}, {})
+
+    def build_block(area, block_label):
+        some_dict = g_some_dict[area]
+        assert not some_dict
+        msize = 1
+
+        for i, site_index in enumerate(sites_by_area[area]):
+            # kronecker all the operators on the block
+            for k, v in some_dict.items():
+                v.m = kron(v.m, identity(model.d))
+
+            handle_operators_on_site(site_index, area, some_dict, msize)
+
+            if i == 0:
+                msize = model.d
+            else:
+                # transform all the operators on the block
+                trmat = trmat_disk[block_label, i + 1]
+                for k, v in some_dict.items():
+                    assert v.refcnt > 0
+                    assert k.area == area
+                    v.m = rotate_and_truncate(v.m, trmat)
+                msize = trmat.shape[1]
+
+        return msize
+
+    # build up the left and right blocks
+    lb_msize = build_block(LEFT_BLOCK, "l")
+    rb_msize = build_block(RIGHT_BLOCK, "r")
+
+    # build up the two bare sites
+    handle_operators_on_site(sites_by_area[LEFT_SITE][0], LEFT_SITE, g_some_dict[LEFT_SITE], 1)
+    handle_operators_on_site(sites_by_area[RIGHT_SITE][0], RIGHT_SITE, g_some_dict[RIGHT_SITE], 1)
+
+    # loop through each operator, put everything together, and take the expectation value.
+    rpsi0 = psi0[rbi]
+    mm_orig = [
+        identity(lb_msize),
+        identity(model.d),
+        identity(rb_msize),
+        identity(model.d),
+    ]
+    returned_measurements = []
+    for pm in processed_measurements:
+        # Because we used the "canonicalize" function, there should be at most
+        # one operator from each of the four areas.
+        assert all([obj.built for obj in pm])
+        st = set([obj.obj.area for obj in pm])
+        assert len(st) == len(pm)
+
+        # kron the operators together.
+        mm = list(mm_orig) # initialize it with identity matrices
+        for obj in pm:
+            mm[obj.obj.area] = g_some_dict[obj.obj.area][obj.obj].m
+        big_m = kron(kron(mm[0], mm[1]), kron(mm[2], mm[3]))
+
+        # rewrite the big operator in the restricted basis of psi0
+        if target_sector is not None:
+            big_m = big_m.tocsr()[:, rbi][rbi, :] # FIXME: why not have it be CSR before?
+
+        # take the expectation value wrt psi0
+        ev = rpsi0.conjugate().transpose().dot(big_m.dot(rpsi0)).item()
+
+        returned_measurements.append(ev)
+
+    for measurement, ev in zip(measurements, returned_measurements):
+        for site_index, operator in measurement:
+            print("%s_{%d}" % (operator, site_index), end=" ")
+        print("=", ev)
 
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
