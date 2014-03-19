@@ -49,7 +49,9 @@ class HeisenbergXXZChain(object):
 
     H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
 
-    def __init__(self, J=1., Jz=1., boundary_condition=open_bc):
+    def __init__(self, J=1., Jz=None, boundary_condition=open_bc):
+        if Jz is None:
+            Jz = J
         self.J = J
         self.Jz = Jz
         self.boundary_condition = boundary_condition
