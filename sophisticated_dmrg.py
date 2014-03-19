@@ -351,6 +351,9 @@ def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi
                         sector_indices[sys_enl_sector].append(current_index)
                         restricted_basis_indices.append(i_offset + j)
 
+        if not restricted_basis_indices:
+            raise RuntimeError("There are zero states in the restricted basis.")
+
         restricted_superblock_hamiltonian = superblock_hamiltonian[:, restricted_basis_indices][restricted_basis_indices, :]
         if psi0_guess is not None:
             restricted_psi0_guess = psi0_guess[restricted_basis_indices]
