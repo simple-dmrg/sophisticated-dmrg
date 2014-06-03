@@ -498,74 +498,88 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
 
     return newblock, energy, transformation_matrix, psi0, restricted_basis_indices
 
-def infinite_system_algorithm(model, L, m, target_sector=None):
-    block = model.initial_block(0)
-    # Repeatedly enlarge the system by performing a single DMRG step, using a
-    # reflection of the current block as the environment.
-    while 2 * block.length < L:
-        current_L = 2 * block.length + 2  # current superblock length
-        if target_sector is not None:
-            # assumes the value is extensive
-            current_target_sector = int(target_sector) * current_L // L
+class DMRG(object):
+    def __init__(self, model, L, m_warmup, target_sector=None, callback=None):
+        if not (L > 0 and L % 2 == 0):
+            raise ValueError("System length `L` must be an even, positive number.")
+
+        # To keep things simple, these dictionaries are not actually saved to disk,
+        # but they are used to represent persistent storage.
+        self.block_disk = {}  # "disk" storage for Block objects
+        self.trmat_disk = {}  # "disk" storage for transformation matrices
+
+        # Use the infinite system algorithm to build up to desired size.  This
+        # algorithm repeatedly enlarges the system by performing a single DMRG
+        # step, each time using a reflection of the current block as the
+        # environment.  Each time we construct a block, we save it for future
+        # reference as both a left ("l") and right ("r") block, as the infinite
+        # system algorithm assumes the environment is a mirror image of the system.
+        block = model.initial_block(0)
+        assert block.length == 1
+        self.block_disk["l", 1] = block
+        while 2 * block.length < L:
+            # Perform a single DMRG step and save the new Block to "disk"
+            print(graphic(model.boundary_condition, block, block))
+            current_L = 2 * block.length + 2  # current superblock length
+            if target_sector is not None:
+                # assumes the value is extensive
+                current_target_sector = int(target_sector) * current_L // L
+            else:
+                current_target_sector = None
+            block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
+            print("E/L =", energy / current_L)
+            self.block_disk["l", block.length] = block
+            self.block_disk["r", block.length] = block
+
+        # Assuming a site-dependent Hamiltonian, the infinite system algorithm
+        # above actually used the wrong superblock Hamiltonian, since the left
+        # block was mirrored and used as the environment.  This mistake will be
+        # fixed during the finite system algorithm sweeps below as long as we begin
+        # with the correct initial block of the right-hand system.
+        if model.boundary_condition == open_bc:
+            right_initial_block_site_index = L - 1  # right-most site
         else:
-            current_target_sector = None
-        print("L =", current_L)
-        block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m, direction="r", target_sector=current_target_sector)
-        print("E/L =", energy / current_L)
+            right_initial_block_site_index = L - 2  # second site from right
+        self.block_disk["r", 1] = model.initial_block(right_initial_block_site_index)
 
-def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None, measurements=None):
-    if not (L > 0 and L % 2 == 0):
-        raise ValueError("System length `L` must be an even, positive number.")
+        # Now that the system is built up to its full size, we perform sweeps using
+        # the finite system algorithm.  At first the left block will act as the
+        # system, growing at the expense of the right block (the environment), but
+        # once we come to the end of the chain these roles will be reversed.
+        self.sys_block = block
+        self.sys_trmat = None
 
-    # To keep things simple, these dictionaries are not actually saved to disk,
-    # but they are used to represent persistent storage.
-    block_disk = {}  # "disk" storage for Block objects
-    trmat_disk = {}  # "disk" storage for transformation matrices
+        # Save some local variables
+        self.model = model
+        self.L = L
+        self.m_warmup = m_warmup
+        self.target_sector = target_sector
 
-    # Use the infinite system algorithm to build up to desired size.  Each time
-    # we construct a block, we save it for future reference as both a left
-    # ("l") and right ("r") block, as the infinite system algorithm assumes the
-    # environment is a mirror image of the system.
-    block = model.initial_block(0)
-    assert block.length == 1
-    block_disk["l", 1] = block
-    while 2 * block.length < L:
-        # Perform a single DMRG step and save the new Block to "disk"
-        print(graphic(model.boundary_condition, block, block))
-        current_L = 2 * block.length + 2  # current superblock length
-        if target_sector is not None:
-            current_target_sector = int(target_sector) * current_L // L
-        else:
-            current_target_sector = None
-        block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
-        print("E/L =", energy / current_L)
-        block_disk["l", block.length] = block
-        block_disk["r", block.length] = block
+        # Initialize some
+        self.m_sweep_list = []
 
-    # Assuming a site-dependent Hamiltonian, the infinite system algorithm
-    # above actually used the wrong superblock Hamiltonian, since the left
-    # block was mirrored and used as the environment.  This mistake will be
-    # fixed during the finite system algorithm sweeps below as long as we begin
-    # with the correct initial block of the right-hand system.
-    if model.boundary_condition == open_bc:
-        right_initial_block_site_index = L - 1  # right-most site
-    else:
-        right_initial_block_site_index = L - 2  # second site from right
-    block_disk["r", 1] = model.initial_block(right_initial_block_site_index)
+        # Save more local variables
+        self.psi0 = psi0
+        self.rbi = rbi
 
-    # Now that the system is built up to its full size, we perform sweeps using
-    # the finite system algorithm.  At first the left block will act as the
-    # system, growing at the expense of the right block (the environment), but
-    # once we come to the end of the chain these roles will be reversed.
-    sys_label, env_label = "l", "r"
-    sys_block = block; del block  # rename the variable
-    sys_trmat = None
-    for m in m_sweep_list:
-        print("Performing sweep with m =", m)
+    def perform_sweep(self, m, callback=None):
+        self.m_sweep_list.append(m)
+
+        psi0 = self.psi0
+        rbi = self.rbi
+
+        sys_block = self.sys_block
+        sys_trmat = self.sys_trmat
+
+        model = self.model
+        L = self.L
+        target_sector = self.target_sector
+
+        sys_label, env_label = "l", "r"
         while True:
             # Load the appropriate environment from "disk"
-            env_block = block_disk[env_label, L - sys_block.length - 2]
-            env_trmat = trmat_disk.get((env_label, L - sys_block.length - 1))
+            env_block = self.block_disk[env_label, L - sys_block.length - 2]
+            env_trmat = self.trmat_disk.get((env_label, L - sys_block.length - 1))
 
             # If possible, predict an estimate of the ground state wavefunction
             # from the previous step's psi0 and known transformation matrices.
@@ -651,224 +665,245 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
             sys.stdout.flush()
 
             # Save the block and transformation matrix from this step to disk.
-            block_disk[sys_label, sys_block.length] = sys_block
-            trmat_disk[sys_label, sys_block.length] = sys_trmat
+            self.block_disk[sys_label, sys_block.length] = sys_block
+            self.trmat_disk[sys_label, sys_block.length] = sys_trmat
 
             # Check whether we just completed a full sweep.
             if sys_label == "l" and 2 * sys_block.length == L:
-                break  # escape from the "while True" loop
+                # Save a few things, then return
+                self.sys_block = sys_block
+                self.sys_trmat = sys_trmat
+                self.psi0 = psi0
+                self.rbi = rbi
+                return
 
-    if measurements is None:
-        return
+    def perform_measurements(self, measurements):
+        if not self.m_sweep_list:
+            raise RuntimeError("You must perform some sweeps in the finite system algorithm if you wish to make any measurements.")
 
-    if not m_sweep_list:
-        raise RuntimeError("You must perform some sweeps in the finite system algorithm if you wish to make any measurements.")
+        psi0 = self.psi0
+        rbi = self.rbi
 
-    # figure out which sites are where
-    LEFT_BLOCK, LEFT_SITE, RIGHT_BLOCK, RIGHT_SITE = 0, 1, 2, 3
-    if model.boundary_condition == open_bc:
-        sites_by_area = (
-            range(0, L // 2 - 1),  # left block
-            [L // 2 - 1],  # left bare site
-            range(L // 2 + 1, L)[::-1],  # right block
-            [L // 2],  # right bare site
-        )
-    else:
-        # PBC algorithm
-        sites_by_area = (
-            range(0, L // 2 - 1),  # left block
-            [L // 2 - 1],  # left bare site
-            range(L // 2, L - 1)[::-1],  # right block
-            [L - 1],  # right bare site
-        )
-    assert sum([len(z) for z in sites_by_area]) == L
-    assert set(chain.from_iterable(sites_by_area)) == set(range(L))
+        sys_block = self.sys_block
+        sys_trmat = self.sys_trmat
 
-    # from the above info, make a lookup table of what class each site is in so
-    # we can look it up easily.
-    site_class = [None] * L
-    for i, heh in enumerate(sites_by_area):
-        for site_index in heh:
-            site_class[site_index] = i
-    assert None not in site_class
+        model = self.model
+        L = self.L
+        target_sector = self.target_sector
 
-    def canonicalize(meas_desc):
-        # This performs a stable sort on operators by site (so we are assuming
-        # that operators on different sites commute).  By doing this, we will
-        # be able to combine operators ASAP as a block grows
-        return sorted(meas_desc, key=lambda x: x[0])
+        # figure out which sites are where
+        LEFT_BLOCK, LEFT_SITE, RIGHT_BLOCK, RIGHT_SITE = 0, 1, 2, 3
+        if model.boundary_condition == open_bc:
+            sites_by_area = (
+                range(0, L // 2 - 1),  # left block
+                [L // 2 - 1],  # left bare site
+                range(L // 2 + 1, L)[::-1],  # right block
+                [L // 2],  # right bare site
+            )
+        else:
+            # PBC algorithm
+            sites_by_area = (
+                range(0, L // 2 - 1),  # left block
+                [L // 2 - 1],  # left bare site
+                range(L // 2, L - 1)[::-1],  # right block
+                [L - 1],  # right bare site
+            )
+        assert sum([len(z) for z in sites_by_area]) == L
+        assert set(chain.from_iterable(sites_by_area)) == set(range(L))
 
-    InnerObject = namedtuple("InnerObject", ["site_indices", "operator_names", "area"])
+        # from the above info, make a lookup table of what class each site is in so
+        # we can look it up easily.
+        site_class = [None] * L
+        for i, heh in enumerate(sites_by_area):
+            for site_index in heh:
+                site_class[site_index] = i
+        assert None not in site_class
 
-    class OuterObject(object):
-        def __init__(self, site_indices, operator_names, area, built=False):
-            self.obj = InnerObject(site_indices, operator_names, area)
-            self.built = built
+        def canonicalize(meas_desc):
+            # This performs a stable sort on operators by site (so we are assuming
+            # that operators on different sites commute).  By doing this, we will
+            # be able to combine operators ASAP as a block grows
+            return sorted(meas_desc, key=lambda x: x[0])
 
-    # first make a list of which operators we need to consider on each site.
-    # This way we won't have to look at every single operator each time we add
-    # a site.
-    #
-    # we are doing at least a few others things here, too...
-    #
-    # We are also checking that each operator and site index is valid.  And we
-    # are copying the measurements so that we can modify them.
-    #
-    # We also make note of which of the four blocks each site is in
-    measurements_by_site = {}
-    processed_measurements = []
-    for meas_desc in measurements:
-        site_indices = set()
-        for site_index, operator_name in meas_desc:
-            if operator_name not in model.sso:
-                raise RuntimeError("Unknown operator: %s" % operator_name)
-            if site_index not in range(L):
-                raise RuntimeError("Unknown site index: %r (L = %r)" % (site_index, L))
-            site_indices.add(site_index)
-        measurement = [OuterObject((site_index,), (operator_name,),
-                                   site_class[site_index], False)
-                       for site_index, operator_name in canonicalize(meas_desc)]
-        processed_measurements.append(measurement)
-        for site_index in site_indices:
-            measurements_by_site.setdefault(site_index, []).append(measurement)
-    assert len(measurements) == len(processed_measurements)
+        InnerObject = namedtuple("InnerObject", ["site_indices", "operator_names", "area"])
 
-    class Yay(object):
-        def __init__(self, m):
-            self.m = m
-            self.refcnt = 1
+        class OuterObject(object):
+            def __init__(self, site_indices, operator_names, area, built=False):
+                self.obj = InnerObject(site_indices, operator_names, area)
+                self.built = built
 
-    def handle_operators_on_site(site_index, area, some_dict, msize):
-        for measurement in measurements_by_site[site_index]:
-            # first replace each operator on this site by an actual operator
-            for i, obj in enumerate(measurement):
-                if obj.obj.site_indices[0] != site_index:
-                    continue
-                assert obj.built is False
-                try:
-                    some_dict[obj.obj].refcnt += 1
-                except KeyError:
-                    assert len(obj.obj.operator_names) == 1
-                    sso = model.sso[obj.obj.operator_names[0]]
-                    mat = kron(identity(msize), sso)
-                    some_dict[obj.obj] = Yay(mat)
-                obj.built = True
+        # first make a list of which operators we need to consider on each site.
+        # This way we won't have to look at every single operator each time we add
+        # a site.
+        #
+        # we are doing at least a few others things here, too...
+        #
+        # We are also checking that each operator and site index is valid.  And we
+        # are copying the measurements so that we can modify them.
+        #
+        # We also make note of which of the four blocks each site is in
+        measurements_by_site = {}
+        processed_measurements = []
+        for meas_desc in measurements:
+            site_indices = set()
+            for site_index, operator_name in meas_desc:
+                if operator_name not in model.sso:
+                    raise RuntimeError("Unknown operator: %s" % operator_name)
+                if site_index not in range(L):
+                    raise RuntimeError("Unknown site index: %r (L = %r)" % (site_index, L))
+                site_indices.add(site_index)
+            measurement = [OuterObject((site_index,), (operator_name,),
+                                       site_class[site_index], False)
+                           for site_index, operator_name in canonicalize(meas_desc)]
+            processed_measurements.append(measurement)
+            for site_index in site_indices:
+                measurements_by_site.setdefault(site_index, []).append(measurement)
+        assert len(measurements) == len(processed_measurements)
 
-            # second, combine all operators that are possible to combine (and decref them in the process)
-            for i in range(len(measurement) - 1)[::-1]:
-                # attempt to combine i and i+1
-                if measurement[i].built and measurement[i + 1].built and measurement[i].obj.area == measurement[i + 1].obj.area == area:
-                    c1, c2 = measurement[i], measurement[i + 1]
+        class Yay(object):
+            def __init__(self, m):
+                self.m = m
+                self.refcnt = 1
 
-                    o1 = some_dict[c1.obj]
-                    o1.refcnt -= 1
-                    if o1.refcnt == 0:
-                        del some_dict[c1.obj]
-
-                    o2 = some_dict[c2.obj]
-                    o2.refcnt -= 1
-                    if o2.refcnt == 0:
-                        del some_dict[c2.obj]
-
-                    c3 = OuterObject(tuple(chain(c1.obj[0], c2.obj[0])),
-                                     tuple(chain(c1.obj[1], c2.obj[1])),
-                                     area, True)
+        def handle_operators_on_site(site_index, area, some_dict, msize):
+            for measurement in measurements_by_site[site_index]:
+                # first replace each operator on this site by an actual operator
+                for i, obj in enumerate(measurement):
+                    if obj.obj.site_indices[0] != site_index:
+                        continue
+                    assert obj.built is False
                     try:
-                        some_dict[c3.obj].refcnt += 1
+                        some_dict[obj.obj].refcnt += 1
                     except KeyError:
-                        some_dict[c3.obj] = Yay(o1.m.dot(o2.m))
+                        assert len(obj.obj.operator_names) == 1
+                        sso = model.sso[obj.obj.operator_names[0]]
+                        mat = kron(identity(msize), sso)
+                        some_dict[obj.obj] = Yay(mat)
+                    obj.built = True
 
-                    measurement.pop(i + 1)
-                    measurement[i] = c3
+                # second, combine all operators that are possible to combine (and decref them in the process)
+                for i in range(len(measurement) - 1)[::-1]:
+                    # attempt to combine i and i+1
+                    if measurement[i].built and measurement[i + 1].built and measurement[i].obj.area == measurement[i + 1].obj.area == area:
+                        c1, c2 = measurement[i], measurement[i + 1]
 
-    g_some_dict = ({}, {}, {}, {})
+                        o1 = some_dict[c1.obj]
+                        o1.refcnt -= 1
+                        if o1.refcnt == 0:
+                            del some_dict[c1.obj]
 
-    def build_block(area, block_label):
-        some_dict = g_some_dict[area]
-        assert not some_dict
-        msize = 1
+                        o2 = some_dict[c2.obj]
+                        o2.refcnt -= 1
+                        if o2.refcnt == 0:
+                            del some_dict[c2.obj]
 
-        for i, site_index in enumerate(sites_by_area[area]):
-            # kronecker all the operators on the block
-            for k, v in some_dict.items():
-                v.m = kron(v.m, identity(model.d))
+                        c3 = OuterObject(tuple(chain(c1.obj[0], c2.obj[0])),
+                                         tuple(chain(c1.obj[1], c2.obj[1])),
+                                         area, True)
+                        try:
+                            some_dict[c3.obj].refcnt += 1
+                        except KeyError:
+                            some_dict[c3.obj] = Yay(o1.m.dot(o2.m))
 
-            handle_operators_on_site(site_index, area, some_dict, msize)
+                        measurement.pop(i + 1)
+                        measurement[i] = c3
 
-            if i == 0:
-                msize = model.d
-            else:
-                # transform all the operators on the block
-                trmat = trmat_disk[block_label, i + 1]
+        g_some_dict = ({}, {}, {}, {})
+
+        def build_block(area, block_label):
+            some_dict = g_some_dict[area]
+            assert not some_dict
+            msize = 1
+
+            for i, site_index in enumerate(sites_by_area[area]):
+                # kronecker all the operators on the block
                 for k, v in some_dict.items():
-                    assert v.refcnt > 0
-                    assert k.area == area
-                    v.m = rotate_and_truncate(v.m, trmat)
-                msize = trmat.shape[1]
+                    v.m = kron(v.m, identity(model.d))
 
-        return msize
+                handle_operators_on_site(site_index, area, some_dict, msize)
 
-    # build up the left and right blocks
-    lb_msize = build_block(LEFT_BLOCK, "l")
-    rb_msize = build_block(RIGHT_BLOCK, "r")
+                if i == 0:
+                    msize = model.d
+                else:
+                    # transform all the operators on the block
+                    trmat = self.trmat_disk[block_label, i + 1]
+                    for k, v in some_dict.items():
+                        assert v.refcnt > 0
+                        assert k.area == area
+                        v.m = rotate_and_truncate(v.m, trmat)
+                    msize = trmat.shape[1]
 
-    # build up the two bare sites
-    handle_operators_on_site(sites_by_area[LEFT_SITE][0], LEFT_SITE, g_some_dict[LEFT_SITE], 1)
-    handle_operators_on_site(sites_by_area[RIGHT_SITE][0], RIGHT_SITE, g_some_dict[RIGHT_SITE], 1)
+            return msize
 
-    # loop through each operator, put everything together, and take the expectation value.
-    rpsi0 = psi0[rbi]
-    mm_orig = [
-        identity(lb_msize),
-        identity(model.d),
-        identity(rb_msize),
-        identity(model.d),
-    ]
-    returned_measurements = []
-    for pm in processed_measurements:
-        # Because we used the "canonicalize" function, there should be at most
-        # one operator from each of the four areas.
-        assert all([obj.built for obj in pm])
-        st = set([obj.obj.area for obj in pm])
-        assert len(st) == len(pm)
+        # build up the left and right blocks
+        lb_msize = build_block(LEFT_BLOCK, "l")
+        rb_msize = build_block(RIGHT_BLOCK, "r")
 
-        # kron the operators together.
-        mm = list(mm_orig) # initialize it with identity matrices
-        for obj in pm:
-            mm[obj.obj.area] = g_some_dict[obj.obj.area][obj.obj].m
-        big_m = kron(kron(mm[0], mm[1]), kron(mm[2], mm[3]))
+        # build up the two bare sites
+        handle_operators_on_site(sites_by_area[LEFT_SITE][0], LEFT_SITE, g_some_dict[LEFT_SITE], 1)
+        handle_operators_on_site(sites_by_area[RIGHT_SITE][0], RIGHT_SITE, g_some_dict[RIGHT_SITE], 1)
 
-        # rewrite the big operator in the restricted basis of psi0
-        if target_sector is not None:
-            big_m = big_m.tocsr()[:, rbi][rbi, :] # FIXME: why not have it be CSR before?
+        # loop through each operator, put everything together, and take the expectation value.
+        rpsi0 = psi0[rbi]
+        mm_orig = [
+            identity(lb_msize),
+            identity(model.d),
+            identity(rb_msize),
+            identity(model.d),
+        ]
+        returned_measurements = []
+        for pm in processed_measurements:
+            # Because we used the "canonicalize" function, there should be at most
+            # one operator from each of the four areas.
+            assert all([obj.built for obj in pm])
+            st = set([obj.obj.area for obj in pm])
+            assert len(st) == len(pm)
 
-        # take the expectation value wrt psi0
-        ev = rpsi0.conjugate().transpose().dot(big_m.dot(rpsi0)).item()
+            # kron the operators together.
+            mm = list(mm_orig) # initialize it with identity matrices
+            for obj in pm:
+                mm[obj.obj.area] = g_some_dict[obj.obj.area][obj.obj].m
+            big_m = kron(kron(mm[0], mm[1]), kron(mm[2], mm[3]))
 
-        returned_measurements.append(ev)
+            # rewrite the big operator in the restricted basis of psi0
+            if target_sector is not None:
+                big_m = big_m.tocsr()[:, rbi][rbi, :] # FIXME: why not have it be CSR before?
 
-    for measurement, ev in zip(measurements, returned_measurements):
-        for site_index, operator in measurement:
-            print("%s_{%d}" % (operator, site_index), end=" ")
-        print("=", ev)
+            # take the expectation value wrt psi0
+            ev = rpsi0.conjugate().transpose().dot(big_m.dot(rpsi0)).item()
 
-    return returned_measurements
+            returned_measurements.append(ev)
+
+        for measurement, ev in zip(measurements, returned_measurements):
+            for site_index, operator in measurement:
+                print("%s_{%d}" % (operator, site_index), end=" ")
+            print("=", ev)
+
+        return returned_measurements
 
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
     def run_sample_spin_chain(boundary_condition, L=20):
         model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=boundary_condition)
+        dmrg = DMRG(model, L=L, m_warmup=10, target_sector=0)
+        for m in [10, 20, 30, 40, 40]:
+            print("Performing sweep with m =", m)
+            dmrg.perform_sweep(m)
         measurements = ([[(i, "Sz")] for i in range(L)] +
                         [[(i, "Sz"), (j, "Sz")] for i in range(L) for j in range(L)] +
                         [[(i, "Sp"), (j, "Sm")] for i in range(L) for j in range(L)])
-        finite_system_algorithm(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=0, measurements=measurements)
+        dmrg.perform_measurements(measurements)
 
     def run_sample_bose_hubbard_chain(boundary_condition, L=20):
         model = BoseHubbardChain(d=4, U=0.5, mu=0.69, boundary_condition=boundary_condition)
+        dmrg = DMRG(model, L=L, m_warmup=10, target_sector=L)
+        for m in [10, 20, 30, 40, 40]:
+            print("Performing sweep with m =", m)
+            dmrg.perform_sweep(m)
         measurements = ([[(i, "n")] for i in range(L)] +
                         [[(i, "n"), (j, "n")] for i in range(L) for j in range(L)])
-        finite_system_algorithm(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=L, measurements=measurements)
+        dmrg.perform_measurements(measurements)
 
     run_sample_spin_chain(open_bc)
     #run_sample_spin_chain(periodic_bc)
