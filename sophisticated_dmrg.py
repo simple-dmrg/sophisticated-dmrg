@@ -857,8 +857,20 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
-    #model = BoseHubbardChain(d=5, U=3., boundary_condition=periodic_bc)
-    model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=open_bc)
+    def run_sample_spin_chain(boundary_condition, L=20):
+        model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=boundary_condition)
+        measurements = ([[(i, "Sz")] for i in range(L)] +
+                        [[(i, "Sz"), (j, "Sz")] for i in range(L) for j in range(L)] +
+                        [[(i, "Sp"), (j, "Sm")] for i in range(L) for j in range(L)])
+        finite_system_algorithm(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=0, measurements=measurements)
 
-    #infinite_system_algorithm(model, L=100, m=20, target_sector=0)
-    finite_system_algorithm(model, L=20, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=None)
+    def run_sample_bose_hubbard_chain(boundary_condition, L=20):
+        model = BoseHubbardChain(d=4, U=0.5, mu=0.69, boundary_condition=boundary_condition)
+        measurements = ([[(i, "n")] for i in range(L)] +
+                        [[(i, "n"), (j, "n")] for i in range(L) for j in range(L)])
+        finite_system_algorithm(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=L, measurements=measurements)
+
+    run_sample_spin_chain(open_bc)
+    #run_sample_spin_chain(periodic_bc)
+    run_sample_bose_hubbard_chain(open_bc)
+    #run_sample_bose_hubbard_chain(periodic_bc)
