@@ -10,7 +10,8 @@
 # provides consistency between python2 and python3.
 from __future__ import print_function, division  # requires Python >= 2.6
 
-from collections import namedtuple
+import sys
+from collections import namedtuple, Callable
 from itertools import chain
 
 import numpy as np
@@ -45,19 +46,30 @@ class HeisenbergXXZChain(object):
     Sz1 = np.array([[0.5, 0], [0, -0.5]], dtype)  # single-site S^z
     Sp1 = np.array([[0, 1], [0, 0]], dtype)  # single-site S^+
 
-    sso = {"Sz": Sz1, "Sp": Sp1}  # single-site operators
+    sso = {"Sz": Sz1, "Sp": Sp1, "Sm": Sp1.transpose()}  # single-site operators
 
     # S^z sectors corresponding to the single site basis elements
     single_site_sectors = np.array([0.5, -0.5])
 
-    H1 = np.array([[0, 0], [0, 0]], dtype)  # single-site portion of H is zero
-
-    def __init__(self, J=1., Jz=None, boundary_condition=open_bc):
+    def __init__(self, J=1., Jz=None, hz=0., boundary_condition=open_bc):
+        """
+        `hz` can be either a number (for a constant magnetic field) or a
+        callable (which is called with the site index and returns the
+        magnetic field on that site).
+        """
         if Jz is None:
             Jz = J
         self.J = J
         self.Jz = Jz
         self.boundary_condition = boundary_condition
+        if isinstance(hz, Callable):
+            self.hz = hz
+        else:
+            self.hz = lambda site_index: hz
+
+    def H1(self, site_index):
+        half_hz = .5 * self.hz(site_index)
+        return np.array([[half_hz, 0], [0, -half_hz]], self.dtype)
 
     def H2(self, Sz1, Sp1, Sz2, Sp2):  # two-site part of H
         """Given the operators S^z and S^+ on two sites in different Hilbert spaces
@@ -70,14 +82,14 @@ class HeisenbergXXZChain(object):
             self.Jz * kron(Sz1, Sz2)
         )
 
-    def initial_block(self):
+    def initial_block(self, site_index):
         if self.boundary_condition == open_bc:
             # conn refers to the connection operator, that is, the operator on the
             # site that was most recently added to the block.  We need to be able
             # to represent S^z and S^+ on that site in the current basis in order
             # to grow the chain.
             operator_dict = {
-                "H": self.H1,
+                "H": self.H1(site_index),
                 "conn_Sz": self.Sz1,
                 "conn_Sp": self.Sp1,
             }
@@ -86,7 +98,7 @@ class HeisenbergXXZChain(object):
             # we must be able to represent the relevant operators on both the
             # left and right sites of the chain.
             operator_dict = {
-                "H": self.H1,
+                "H": self.H1(site_index),
                 "l_Sz": self.Sz1,
                 "l_Sp": self.Sp1,
                 "r_Sz": self.Sz1,
@@ -95,7 +107,7 @@ class HeisenbergXXZChain(object):
         return Block(length=1, basis_size=self.d, operator_dict=operator_dict,
                      basis_sector_array=self.single_site_sectors)
 
-    def enlarge_block(self, block, direction=None):
+    def enlarge_block(self, block, direction, bare_site_index):
         """This function enlarges the provided Block by a single site, returning an
         EnlargedBlock.
         """
@@ -110,7 +122,7 @@ class HeisenbergXXZChain(object):
         if self.boundary_condition == open_bc:
             enlarged_operator_dict = {
                 "H": kron(o["H"], identity(self.d)) +
-                     kron(identity(mblock), self.H1) +
+                     kron(identity(mblock), self.H1(bare_site_index)) +
                      self.H2(o["conn_Sz"], o["conn_Sp"], self.Sz1, self.Sp1),
                 "conn_Sz": kron(identity(mblock), self.Sz1),
                 "conn_Sp": kron(identity(mblock), self.Sp1),
@@ -120,7 +132,7 @@ class HeisenbergXXZChain(object):
             if direction == "l":
                 enlarged_operator_dict = {
                     "H": kron(o["H"], identity(self.d)) +
-                         kron(identity(mblock), self.H1) +
+                         kron(identity(mblock), self.H1(bare_site_index)) +
                          self.H2(o["l_Sz"], o["l_Sp"], self.Sz1, self.Sp1),
                     "l_Sz": kron(identity(mblock), self.Sz1),
                     "l_Sp": kron(identity(mblock), self.Sp1),
@@ -130,7 +142,7 @@ class HeisenbergXXZChain(object):
             else:
                 enlarged_operator_dict = {
                     "H": kron(o["H"], identity(self.d)) +
-                         kron(identity(mblock), self.H1) +
+                         kron(identity(mblock), self.H1(bare_site_index)) +
                          self.H2(o["r_Sz"], o["r_Sp"], self.Sz1, self.Sp1),
                     "l_Sz": kron(o["l_Sz"], identity(self.d)),
                     "l_Sp": kron(o["l_Sp"], identity(self.d)),
@@ -182,7 +194,7 @@ class BoseHubbardChain(object):
         self.H1 = np.diag(.5 * U * ndiag * (ndiag - 1) - mu * ndiag)  # single-site term of H
         self.sso = {"n": self.n_op, "b": self.b_op}  # single-site operators
 
-    def initial_block(self):
+    def initial_block(self, site_index):
         if self.boundary_condition == open_bc:
             # conn refers to the connection operator, that is, the operator on the
             # site that was most recently added to the block.  We need to be able
@@ -216,7 +228,7 @@ class BoseHubbardChain(object):
         return -self.t * (kron(b1, b2.conjugate().transpose()) +
                           kron(b1.conjugate().transpose(), b2))
 
-    def enlarge_block(self, block, direction=None):
+    def enlarge_block(self, block, direction, bare_site_index):
         """This function enlarges the provided Block by a single site, returning an
         EnlargedBlock.
         """
@@ -310,7 +322,41 @@ def index_map(array):
         d.setdefault(value, []).append(index)
     return d
 
-def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi0_guess=None):
+def graphic(boundary_condition, sys_block, env_block, direction="r"):
+    """Returns a graphical representation of the DMRG step we are about to
+    perform, using '=' to represent the system sites, '-' to represent the
+    environment sites, and '**' to represent the two intermediate sites.
+    """
+    order = {"r": 1, "l": -1}[direction]
+    l_symbol, r_symbol = ("=", "-")[::order]
+    l_length, r_length = (sys_block.length, env_block.length)[::order]
+
+    if boundary_condition == open_bc:
+        return (l_symbol * l_length) + "+*"[::order] + (r_symbol * r_length)
+    else:
+        return (l_symbol * l_length) + "+" + (r_symbol * r_length) + "*"
+
+def bare_site_indices(boundary_condition, sys_block, env_block, direction):
+    """Returns the site indices of the two bare sites: first the one in the
+    enlarged system block, then the one in the enlarged environment block.
+    """
+    order = {"r": 1, "l": -1}[direction]
+    l_block, r_block = (sys_block, env_block)[::order]
+    if boundary_condition == open_bc:
+        l_site_index = l_block.length
+        r_site_index = l_site_index + 1
+        sys_site_index, env_site_index = (l_site_index, r_site_index)[::order]
+    else:
+        sys_site_index = l_block.length
+        env_site_index = l_block.length + r_block.length + 1
+
+    g = graphic(boundary_condition, sys_block, env_block, direction)
+    assert sys_site_index == g.index("+")
+    assert env_site_index == g.index("*")
+
+    return sys_site_index, env_site_index
+
+def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_guess=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -319,15 +365,14 @@ def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi
     assert is_valid_block(sys)
     assert is_valid_block(env)
 
+    # Determine the site indices of the two bare sites
+    sys_site_index, env_site_index = bare_site_indices(model.boundary_condition, sys, env, direction)
+
     # Enlarge each block by a single site.
-    sys_enl = model.enlarge_block(sys, direction)
+    sys_enl = model.enlarge_block(sys, direction, sys_site_index)
     sys_enl_basis_by_sector = index_map(sys_enl.basis_sector_array)
-    if sys is env:  # no need to recalculate a second time
-        env_enl = sys_enl
-        env_enl_basis_by_sector = sys_enl_basis_by_sector
-    else:
-        env_enl = model.enlarge_block(env, direction)
-        env_enl_basis_by_sector = index_map(env_enl.basis_sector_array)
+    env_enl = model.enlarge_block(env, direction, env_site_index)
+    env_enl_basis_by_sector = index_map(env_enl.basis_sector_array)
 
     assert is_valid_enlarged_block(sys_enl)
     assert is_valid_enlarged_block(env_enl)
@@ -453,22 +498,8 @@ def single_dmrg_step(model, sys, env, m, direction=None, target_sector=None, psi
 
     return newblock, energy, transformation_matrix, psi0, restricted_basis_indices
 
-def graphic(boundary_condition, sys_block, env_block, sys_label="l"):
-    """Returns a graphical representation of the DMRG step we are about to
-    perform, using '=' to represent the system sites, '-' to represent the
-    environment sites, and '**' to represent the two intermediate sites.
-    """
-    order = {"l": 1, "r": -1}[sys_label]
-    l_symbol, r_symbol = ("=", "-")[::order]
-    l_length, r_length = (sys_block.length, env_block.length)[::order]
-
-    if boundary_condition == open_bc:
-        return (l_symbol * l_length) + "**" + (r_symbol * r_length)
-    else:
-        return (l_symbol * l_length) + "*" + (r_symbol * r_length) + "*"
-
 def infinite_system_algorithm(model, L, m, target_sector=None):
-    block = model.initial_block()
+    block = model.initial_block(0)
     # Repeatedly enlarge the system by performing a single DMRG step, using a
     # reflection of the current block as the environment.
     while 2 * block.length < L:
@@ -495,9 +526,9 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
     # we construct a block, we save it for future reference as both a left
     # ("l") and right ("r") block, as the infinite system algorithm assumes the
     # environment is a mirror image of the system.
-    block = model.initial_block()
-    block_disk["l", block.length] = block
-    block_disk["r", block.length] = block
+    block = model.initial_block(0)
+    assert block.length == 1
+    block_disk["l", 1] = block
     while 2 * block.length < L:
         # Perform a single DMRG step and save the new Block to "disk"
         print(graphic(model.boundary_condition, block, block))
@@ -510,6 +541,17 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
         print("E/L =", energy / current_L)
         block_disk["l", block.length] = block
         block_disk["r", block.length] = block
+
+    # Assuming a site-dependent Hamiltonian, the infinite system algorithm
+    # above actually used the wrong superblock Hamiltonian, since the left
+    # block was mirrored and used as the environment.  This mistake will be
+    # fixed during the finite system algorithm sweeps below as long as we begin
+    # with the correct initial block of the right-hand system.
+    if model.boundary_condition == open_bc:
+        right_initial_block_site_index = L - 1  # right-most site
+    else:
+        right_initial_block_site_index = L - 2  # second site from right
+    block_disk["r", 1] = model.initial_block(right_initial_block_site_index)
 
     # Now that the system is built up to its full size, we perform sweeps using
     # the finite system algorithm.  At first the left block will act as the
@@ -585,9 +627,24 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
                 # Reshape into a column vector
                 psi0g = psi0g.reshape((-1, 1), order="C")
 
+            # Note that the direction of the DMRG step will always be the same
+            # as the environment label.  If the system block is being enlarged
+            # to the right, the environment block will be on the right.  If the
+            # system block is being enlarged to the left, the environment block
+            # must be on the right.  This is true for both open and periodic
+            # boundary conditions:
+            #
+            # Open BC:
+            #    ======+*------   (direction == "r")
+            #    ------*+======   (direction == "l")
+            # Periodic BC:
+            #    ======+------*   (direction == "r")
+            #    ------+======*   (direction == "l")
+            direction = env_label
+
             # Perform a single DMRG step.
-            print(graphic(model.boundary_condition, sys_block, env_block, sys_label))
-            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=env_label, target_sector=target_sector, psi0_guess=psi0g)
+            print(graphic(model.boundary_condition, sys_block, env_block, direction=direction))
+            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=direction, target_sector=target_sector, psi0_guess=psi0g)
 
             print("E/L =", energy / L)
             print("E   =", energy)
@@ -794,6 +851,8 @@ def finite_system_algorithm(model, L, m_warmup, m_sweep_list, target_sector=None
         for site_index, operator in measurement:
             print("%s_{%d}" % (operator, site_index), end=" ")
         print("=", ev)
+
+    return returned_measurements
 
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
