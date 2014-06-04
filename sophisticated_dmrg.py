@@ -356,7 +356,9 @@ def bare_site_indices(boundary_condition, sys_block, env_block, direction):
 
     return sys_site_index, env_site_index
 
-def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_guess=None):
+StepInfo = namedtuple("StepInfo", ["truncation_error", "overlap", "energy", "L"])
+
+def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_guess=None, callback=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -472,8 +474,8 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
     # multiplications.
     transformation_matrix = transformation_matrix.tocsr()
 
+    # Calculate the truncation error
     truncation_error = 1 - sum([x[0] for x in possible_eigenstates[:my_m]])
-    print("truncation error", truncation_error)
 
     # Rotate and truncate each operator.
     new_operator_dict = {}
@@ -491,15 +493,24 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
     for i, z in enumerate(restricted_basis_indices):
         psi0[z, 0] = restricted_psi0[i, 0]
     assert np.all(psi0[restricted_basis_indices] == restricted_psi0)
+
+    # Determine the overlap between psi0_guess and psi0
     if psi0_guess is not None:
         overlap = np.absolute(np.dot(psi0_guess.conjugate().transpose(), psi0).item())
         overlap /= np.linalg.norm(psi0_guess) * np.linalg.norm(psi0)  # normalize it
-        print("overlap |<psi0_guess|psi0>| =", overlap)
+    else:
+        overlap = None
+
+    L = sys_enl.length + env_enl.length
+    callback(StepInfo(truncation_error=truncation_error,
+                      overlap=overlap,
+                      energy=energy,
+                      L=L))
 
     return newblock, energy, transformation_matrix, psi0, restricted_basis_indices
 
 class DMRG(object):
-    def __init__(self, model, L, m_warmup, target_sector=None, callback=None):
+    def __init__(self, model, L, m_warmup, target_sector=None, callback=None, graphic_callback=None):
         if not (L > 0 and L % 2 == 0):
             raise ValueError("System length `L` must be an even, positive number.")
 
@@ -519,15 +530,15 @@ class DMRG(object):
         self.block_disk["l", 1] = block
         while 2 * block.length < L:
             # Perform a single DMRG step and save the new Block to "disk"
-            print(graphic(model.boundary_condition, block, block))
+            if graphic_callback is not None:
+                graphic_callback(graphic(model.boundary_condition, block, block))
             current_L = 2 * block.length + 2  # current superblock length
             if target_sector is not None:
                 # assumes the value is extensive
                 current_target_sector = int(target_sector) * current_L // L
             else:
                 current_target_sector = None
-            block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector)
-            print("E/L =", energy / current_L)
+            block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector, callback=callback)
             self.block_disk["l", block.length] = block
             self.block_disk["r", block.length] = block
 
@@ -562,7 +573,7 @@ class DMRG(object):
         self.psi0 = psi0
         self.rbi = rbi
 
-    def perform_sweep(self, m, callback=None):
+    def perform_sweep(self, m, callback=None, graphic_callback=None):
         self.m_sweep_list.append(m)
 
         psi0 = self.psi0
@@ -657,12 +668,9 @@ class DMRG(object):
             direction = env_label
 
             # Perform a single DMRG step.
-            print(graphic(model.boundary_condition, sys_block, env_block, direction=direction))
-            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=direction, target_sector=target_sector, psi0_guess=psi0g)
-
-            print("E/L =", energy / L)
-            print("E   =", energy)
-            sys.stdout.flush()
+            if graphic_callback is not None:
+                graphic_callback(graphic(model.boundary_condition, sys_block, env_block, direction=direction))
+            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=direction, target_sector=target_sector, psi0_guess=psi0g, callback=callback)
 
             # Save the block and transformation matrix from this step to disk.
             self.block_disk[sys_label, sys_block.length] = sys_block
@@ -874,36 +882,52 @@ class DMRG(object):
 
             returned_measurements.append(ev)
 
-        for measurement, ev in zip(measurements, returned_measurements):
-            for site_index, operator in measurement:
-                print("%s_{%d}" % (operator, site_index), end=" ")
-            print("=", ev)
-
         return returned_measurements
+
+def default_callback(step_info):
+    print("truncation error", step_info.truncation_error)
+    if step_info.overlap is not None:
+        print("overlap |<psi0_guess|psi0>| =", step_info.overlap)
+    print("E/L =", step_info.energy / step_info.L)
+    print("E   =", step_info.energy)
+    sys.stdout.flush()
+
+def default_graphic_callback(current_graphic):
+    print(current_graphic)
+    sys.stdout.flush()
+
+def perform_dmrg(model, L, m_warmup, m_sweep_list, target_sector=None, measurements=None):
+    dmrg = DMRG(model, L=L, m_warmup=m_warmup, target_sector=target_sector,
+                callback=default_callback, graphic_callback=default_graphic_callback)
+    for m in m_sweep_list:
+        print("Performing sweep with m =", m)
+        dmrg.perform_sweep(m, callback=default_callback, graphic_callback=default_graphic_callback)
+
+    if measurements is None:
+        return
+
+    returned_measurements = dmrg.perform_measurements(measurements)
+    for measurement, ev in zip(measurements, returned_measurements):
+        for site_index, operator in measurement:
+            print("%s_{%d}" % (operator, site_index), end=" ")
+        print("=", "{:.20f}".format(ev))
+    return returned_measurements
 
 if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
     def run_sample_spin_chain(boundary_condition, L=20):
         model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=boundary_condition)
-        dmrg = DMRG(model, L=L, m_warmup=10, target_sector=0)
-        for m in [10, 20, 30, 40, 40]:
-            print("Performing sweep with m =", m)
-            dmrg.perform_sweep(m)
         measurements = ([[(i, "Sz")] for i in range(L)] +
                         [[(i, "Sz"), (j, "Sz")] for i in range(L) for j in range(L)] +
                         [[(i, "Sp"), (j, "Sm")] for i in range(L) for j in range(L)])
-        dmrg.perform_measurements(measurements)
+        perform_dmrg(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=0, measurements=measurements)
 
     def run_sample_bose_hubbard_chain(boundary_condition, L=20):
         model = BoseHubbardChain(d=4, U=0.5, mu=0.69, boundary_condition=boundary_condition)
-        dmrg = DMRG(model, L=L, m_warmup=10, target_sector=L)
-        for m in [10, 20, 30, 40, 40]:
-            print("Performing sweep with m =", m)
-            dmrg.perform_sweep(m)
         measurements = ([[(i, "n")] for i in range(L)] +
                         [[(i, "n"), (j, "n")] for i in range(L) for j in range(L)])
-        dmrg.perform_measurements(measurements)
+        perform_dmrg(model, L=L, m_warmup=10, m_sweep_list=[10, 20, 30, 40, 40], target_sector=L, measurements=measurements)
 
     run_sample_spin_chain(open_bc)
     #run_sample_spin_chain(periodic_bc)
