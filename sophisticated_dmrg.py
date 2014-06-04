@@ -432,14 +432,16 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
     else:
         # Call ARPACK to find the superblock ground state.  ("SA" means find the
         # "smallest in amplitude" eigenvalue.)
-        (energy,), restricted_psi0 = eigsh(restricted_superblock_hamiltonian, k=1, which="SA", v0=restricted_psi0_guess)
+        w, v = eigsh(restricted_superblock_hamiltonian, k=1, which="SA", v0=restricted_psi0_guess)
+        energy = w[0]
+        restricted_psi0 = v.flatten()
 
     # Construct each block of the reduced density matrix of the system by
     # tracing out the environment
     rho_block_dict = {}
     for sys_enl_sector, indices in sector_indices.items():
         if indices: # if indices is nonempty
-            psi0_sector = restricted_psi0[indices, :]
+            psi0_sector = restricted_psi0[indices]
             # We want to make the (sys, env) indices correspond to (row,
             # column) of a matrix, respectively.  Since the environment
             # (column) index updates most quickly in our Kronecker product
@@ -489,9 +491,9 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
 
     # Construct psi0 (that is, in the full superblock basis) so we can use it
     # later for eigenstate prediction.
-    psi0 = np.zeros([m_sys_enl * m_env_enl, 1], model.dtype)
+    psi0 = np.zeros([m_sys_enl * m_env_enl], model.dtype)
     for i, z in enumerate(restricted_basis_indices):
-        psi0[z, 0] = restricted_psi0[i, 0]
+        psi0[z] = restricted_psi0[i]
     assert np.all(psi0[restricted_basis_indices] == restricted_psi0)
 
     # Determine the overlap between psi0_guess and psi0
