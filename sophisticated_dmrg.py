@@ -356,9 +356,15 @@ def bare_site_indices(boundary_condition, sys_block, env_block, direction):
 
     return sys_site_index, env_site_index
 
+def arpack_diagonalize_superblock(hamiltonian, guess):
+    # Call ARPACK to find the superblock ground state.  ("SA" means find the
+    # "smallest in amplitude" eigenvalue.)
+    w, v = eigsh(hamiltonian, k=1, which="SA", v0=guess)
+    return w[0], v.flatten()
+
 StepInfo = namedtuple("StepInfo", ["truncation_error", "overlap", "energy", "L"])
 
-def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_guess=None, callback=None):
+def single_dmrg_step(model, sys, env, m, direction, diagonalize_superblock, target_sector=None, psi0_guess=None, callback=None):
     """Perform a single DMRG step using `sys` as the system and `env` as the
     environment, keeping a maximum of `m` states in the new basis.  If
     `psi0_guess` is provided, it will be used as a starting vector for the
@@ -430,11 +436,7 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
         restricted_psi0 = np.array([[1.]], dtype=model.dtype)
         energy = restricted_superblock_hamiltonian[0, 0]
     else:
-        # Call ARPACK to find the superblock ground state.  ("SA" means find the
-        # "smallest in amplitude" eigenvalue.)
-        w, v = eigsh(restricted_superblock_hamiltonian, k=1, which="SA", v0=restricted_psi0_guess)
-        energy = w[0]
-        restricted_psi0 = v.flatten()
+        energy, restricted_psi0 = diagonalize_superblock(restricted_superblock_hamiltonian, restricted_psi0_guess)
 
     # Construct each block of the reduced density matrix of the system by
     # tracing out the environment
@@ -512,7 +514,7 @@ def single_dmrg_step(model, sys, env, m, direction, target_sector=None, psi0_gue
     return newblock, energy, transformation_matrix, psi0, restricted_basis_indices
 
 class DMRG(object):
-    def __init__(self, model, L, m_warmup, target_sector=None, callback=None, graphic_callback=None):
+    def __init__(self, model, L, m_warmup, diagonalize_superblock=arpack_diagonalize_superblock, target_sector=None, callback=None, graphic_callback=None):
         if not (L > 0 and L % 2 == 0):
             raise ValueError("System length `L` must be an even, positive number.")
 
@@ -540,7 +542,7 @@ class DMRG(object):
                 current_target_sector = int(target_sector) * current_L // L
             else:
                 current_target_sector = None
-            block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", target_sector=current_target_sector, callback=callback)
+            block, energy, transformation_matrix, psi0, rbi = single_dmrg_step(model, block, block, m=m_warmup, direction="r", diagonalize_superblock=diagonalize_superblock, target_sector=current_target_sector, callback=callback)
             self.block_disk["l", block.length] = block
             self.block_disk["r", block.length] = block
 
@@ -567,6 +569,7 @@ class DMRG(object):
         self.L = L
         self.m_warmup = m_warmup
         self.target_sector = target_sector
+        self.diagonalize_superblock = diagonalize_superblock
 
         # Initialize some
         self.m_sweep_list = []
@@ -672,7 +675,7 @@ class DMRG(object):
             # Perform a single DMRG step.
             if graphic_callback is not None:
                 graphic_callback(graphic(model.boundary_condition, sys_block, env_block, direction=direction))
-            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=direction, target_sector=target_sector, psi0_guess=psi0g, callback=callback)
+            sys_block, energy, sys_trmat, psi0, rbi = single_dmrg_step(model, sys_block, env_block, m=m, direction=direction, diagonalize_superblock=self.diagonalize_superblock, target_sector=target_sector, psi0_guess=psi0g, callback=callback)
 
             # Save the block and transformation matrix from this step to disk.
             self.block_disk[sys_label, sys_block.length] = sys_block
