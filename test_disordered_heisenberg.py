@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from sophisticated_dmrg import HeisenbergSpinHalfXXZChain, finite_system_algorithm, open_bc, periodic_bc
+from sophisticated_dmrg import HeisenbergSpinHalfXXZChain, perform_dmrg, open_bc, periodic_bc
 
 # expected results are taken from exact diagonalization
 
@@ -647,7 +647,7 @@ if __name__ == "__main__":
                         [((i, "Sz"), (j, "Sz")) for i in range(L) for j in range(L)] +
                         [((i, "Sp"), (j, "Sm")) for i in range(L) for j in range(L)])
 
-        measurements_results = finite_system_algorithm(model, L=L, m_warmup=50, m_sweep_list=[50, 100, 200, 200], target_sector=0, measurements=measurements)
+        measurements_results = perform_dmrg(model, L=L, m_warmup=50, m_sweep_list=[50, 100, 200, 200], target_sector=0, measurements=measurements)
 
         measurements_map = dict(zip(measurements, measurements_results))
 
