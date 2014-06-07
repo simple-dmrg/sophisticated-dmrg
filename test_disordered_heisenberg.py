@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from sophisticated_dmrg import HeisenbergXXZChain, finite_system_algorithm, open_bc, periodic_bc
+from sophisticated_dmrg import HeisenbergSpinHalfXXZChain, finite_system_algorithm, open_bc, periodic_bc
 
 # expected results are taken from exact diagonalization
 
@@ -641,7 +641,7 @@ if __name__ == "__main__":
     hz = lambda i: hz_list[i]
 
     for boundary_condition in (open_bc, periodic_bc):
-        model = HeisenbergXXZChain(J=1., Jz=1., hz=hz, boundary_condition=boundary_condition)
+        model = HeisenbergSpinHalfXXZChain(J=1., Jz=1., hz=hz, boundary_condition=boundary_condition)
 
         measurements = ([((i, "Sz"),) for i in range(L)] +
                         [((i, "Sz"), (j, "Sz")) for i in range(L) for j in range(L)] +

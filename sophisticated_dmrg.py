@@ -39,7 +39,7 @@ def is_valid_block(block):
 is_valid_enlarged_block = is_valid_block
 
 # Model-specific code for the Heisenberg XXZ chain
-class HeisenbergXXZChain(object):
+class HeisenbergSpinHalfXXZChain(object):
     dtype = 'd'  # double-precision floating point
     d = 2  # single-site basis size
 
@@ -922,7 +922,7 @@ if __name__ == "__main__":
     np.set_printoptions(precision=10, suppress=True, threshold=10000, linewidth=300)
 
     def run_sample_spin_chain(boundary_condition, L=20):
-        model = HeisenbergXXZChain(J=1., Jz=1., boundary_condition=boundary_condition)
+        model = HeisenbergSpinHalfXXZChain(J=1., Jz=1., boundary_condition=boundary_condition)
         measurements = ([[(i, "Sz")] for i in range(L)] +
                         [[(i, "Sz"), (j, "Sz")] for i in range(L) for j in range(L)] +
                         [[(i, "Sp"), (j, "Sm")] for i in range(L) for j in range(L)])
