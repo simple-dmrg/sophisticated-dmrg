@@ -1,16 +1,18 @@
-===========
-SIMPLE DMRG
-===========
+==================
+sophisticated-dmrg
+==================
 
-Source code: https://github.com/simple-dmrg/simple-dmrg/
+Source code: https://github.com/simple-dmrg/sophisticated-dmrg/
 
-Documentation: http://simple-dmrg.readthedocs.org/
+Documentation: http://sophisticated-dmrg.readthedocs.org/
 
-The goal of this tutorial (given at the `2013 summer school on quantum
-spin liquids <http://www.democritos.it/qsl2013/>`_, in Trieste, Italy)
-is to present the `density-matrix renormalization group
+This code is an expanded `density-matrix renormalization group
 <http://en.wikipedia.org/wiki/Density_matrix_renormalization_group>`_
-(DMRG) in its traditional formulation (i.e. without using matrix
+(DMRG) program, based on code written for a `tutorial
+<http://simple-dmrg.readthedocs.org/>`_ given originally at the `2013
+summer school on quantum spin liquids
+<http://www.democritos.it/qsl2013/>`_, in Trieste, Italy.  It
+implements DMRG its traditional formulation (i.e. without using matrix
 product states).  DMRG is a numerical method that allows for the
 efficient simulation of quantum model Hamiltonians.  Since it is a
 low-entanglement approximation, it often works quite well for
@@ -22,28 +24,44 @@ between clear, simple code, and including many features and
 optimizations that would exist in a production code.  One thing that
 helps with this is the use of `Python <http://www.python.org/>`_.  We
 have tried to write the code in a very explicit style, hoping that it
-will be (mostly) understandable to somebody new to Python. (See also
-the included :doc:`Python cheatsheet <python-cheatsheet>`, which lists
-many of the Python features used by ``simple-dmrg``, and which should
-be helpful when trying the included :doc:`exercises <exercises>`.)
+will be (mostly) understandable to somebody new to Python.
 
-The four modules build up DMRG from its simplest implementation to
-more complex implementations and optimizations.  Each file adds lines
-of code and complexity compared with the previous version.
+Features
+========
 
-1. :doc:`Infinite system algorithm <01_infinite_system>`
-   (~180 lines, including comments)
-2. :doc:`Finite system algorithm <02_finite_system>`
-   (~240 lines)
-3. :doc:`Conserved quantum numbers <03_conserved_quantum_numbers>`
-   (~310 lines)
-4. :doc:`Eigenstate prediction <04_eigenstate_prediction>`
-   (~370 lines)
+Beyond the features already existing in `simple-dmrg
+<http://simple-dmrg.readthedocs.org/>`_ (infinite and finite system
+algorithms, conserved abelian quantum numbers, and eigenstate
+prediction), sophisticated-dmrg offers the following improvements:
 
-Throughout the tutorial, we focus on the spin-1/2 `Heisenberg XXZ
-model <http://en.wikipedia.org/wiki/Heisenberg_model_(quantum)>`_, but
-the code could easily be modified (or expanded) to work with other
-models.
+* pluggable models
+  * `Heisenberg XXZ
+    <http://en.wikipedia.org/wiki/Heisenberg_model_(quantum)>`_
+  * `Bose-Hubbard
+    <http://en.wikipedia.org/wiki/Bose%E2%80%93Hubbard_model>`_
+* choice between open or periodic boundary conditions
+* measurements (assumes operators on different sites commute)
+* site-dependent potential (e.g. to implement disorder)
+
+Future features
+===============
+
+Planned and potential features
+------------------------------
+
+* use disk (not RAM) for persistent storage
+* efficient representation of the Hamiltonian (if easily possible in python)
+* time-dependent DMRG
+* custom Lanczos
+* fermions and fermionic Hubbard models
+* models for ladder systems
+* site-dependent hopping terms (e.g. to implement "hopping disorder")
+
+Highly unlikely future features
+-------------------------------
+
+* rewrite in terms of matrix product states
+* non-abelian symmetries (e.g. SU(2))
 
 Authors
 =======
@@ -61,7 +79,4 @@ Contents
    :maxdepth: 2
 
    using
-   exercises
-   python-cheatsheet
    references
-   source-code
