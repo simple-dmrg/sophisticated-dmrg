@@ -7,21 +7,21 @@ The requirements are:
 * `numpy <http://www.numpy.org/>`_ and `scipy <http://www.scipy.org/>`_
 
 Download the code using the `Download ZIP
-<https://github.com/simple-dmrg/simple-dmrg/archive/master.zip>`_
+<https://github.com/simple-dmrg/sophisticated-dmrg/archive/master.zip>`_
 button on github, or run the following command from a terminal::
 
-    $ wget -O simple-dmrg-master.zip https://github.com/simple-dmrg/simple-dmrg/archive/master.zip
+    $ wget -O sophisticated-dmrg-master.zip https://github.com/simple-dmrg/sophisticated-dmrg/archive/master.zip
 
 Within a terminal, execute the following to unpack the code::
 
-    $ unzip simple-dmrg-master.zip
-    $ cd simple-dmrg-master/
+    $ unzip sophisticated-dmrg-master.zip
+    $ cd sophisticated-dmrg-master/
 
 Once the relevant software is installed, each program is contained
 entirely in a single file.  The first program, for instance, can be
 run by issuing::
 
-    $ python simple_dmrg_01_infinite_system.py
+    $ python sophisticated_dmrg.py
 
 .. note::
 
