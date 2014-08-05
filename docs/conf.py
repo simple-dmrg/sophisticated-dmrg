@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# simple-dmrg documentation build configuration file, created by
+# sophisticated-dmrg documentation build configuration file, created by
 # sphinx-quickstart on Sun Sep 22 15:32:13 2013.
 #
 # This file is execfile()d with the current directory set to its containing dir.
@@ -40,7 +40,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'simple-dmrg'
+project = u'sophisticated-dmrg'
 copyright = u'2013, James R. Garrison and Ryan V. Mishmash'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -164,7 +164,7 @@ html_theme = 'default'
 #html_file_suffix = None
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'simple-dmrgdoc'
+htmlhelp_basename = 'sophisticated-dmrgdoc'
 
 
 # -- Options for LaTeX output --------------------------------------------------
@@ -183,7 +183,7 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'simple-dmrg.tex', u'simple-dmrg Documentation',
+  ('index', 'sophisticated-dmrg.tex', u'sophisticated-dmrg Documentation',
    u'James R. Garrison and Ryan V. Mishmash', 'manual'),
 ]
 
@@ -213,7 +213,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'simple-dmrg', u'simple-dmrg Documentation',
+    ('index', 'sophisticated-dmrg', u'sophisticated-dmrg Documentation',
      [u'James R. Garrison and Ryan V. Mishmash'], 1)
 ]
 
@@ -227,8 +227,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'simple-dmrg', u'simple-dmrg Documentation',
-   u'James R. Garrison and Ryan V. Mishmash', 'simple-dmrg', 'One line description of project.',
+  ('index', 'sophisticated-dmrg', u'sophisticated-dmrg Documentation',
+   u'James R. Garrison and Ryan V. Mishmash', 'sophisticated-dmrg', 'One line description of project.',
    'Miscellaneous'),
 ]
 
