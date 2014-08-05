@@ -83,4 +83,3 @@ Contents
    :maxdepth: 2
 
    using
-   references
