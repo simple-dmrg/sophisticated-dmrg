@@ -34,14 +34,18 @@ Beyond the features already existing in `simple-dmrg
 algorithms, conserved abelian quantum numbers, and eigenstate
 prediction), sophisticated-dmrg offers the following improvements:
 
-* pluggable models
-  * `Heisenberg XXZ
+- pluggable models
+
+  - `Heisenberg XXZ
     <http://en.wikipedia.org/wiki/Heisenberg_model_(quantum)>`_
-  * `Bose-Hubbard
+  - `Bose-Hubbard
     <http://en.wikipedia.org/wiki/Bose%E2%80%93Hubbard_model>`_
-* choice between open or periodic boundary conditions
-* measurements (assumes operators on different sites commute)
-* site-dependent potential (e.g. to implement disorder)
+
+- choice between open or periodic boundary conditions
+
+- measurements (assumes operators on different sites commute)
+
+- site-dependent potential (e.g. to implement disorder)
 
 Future features
 ===============
@@ -49,25 +53,25 @@ Future features
 Planned and potential features
 ------------------------------
 
-* use disk (not RAM) for persistent storage
-* efficient representation of the Hamiltonian (if easily possible in python)
-* time-dependent DMRG
-* custom Lanczos
-* fermions and fermionic Hubbard models
-* models for ladder systems
-* site-dependent hopping terms (e.g. to implement "hopping disorder")
+- use disk (not RAM) for persistent storage
+- efficient representation of the Hamiltonian (if easily possible in python)
+- time-dependent DMRG
+- custom Lanczos
+- fermions and fermionic Hubbard models
+- models for ladder systems
+- site-dependent hopping terms (e.g. to implement "hopping disorder")
 
 Highly unlikely future features
 -------------------------------
 
-* rewrite in terms of matrix product states
-* non-abelian symmetries (e.g. SU(2))
+- rewrite in terms of matrix product states
+- non-abelian symmetries (e.g. SU(2))
 
 Authors
 =======
 
-* James R. Garrison (UCSB)
-* Ryan V. Mishmash (UCSB)
+- James R. Garrison (UCSB)
+- Ryan V. Mishmash (UCSB)
 
 Licensed under the MIT license.  If you plan to publish work based on
 this code, please contact us to find out how to cite us.
