@@ -48,14 +48,11 @@ class HeisenbergSpinHalfXXZChain(object):
 
     sso = {"Sz": Sz1, "Sp": Sp1, "Sm": Sp1.transpose()}  # single-site operators
 
-    # S^z sectors corresponding to the single site basis elements
-    single_site_sectors = np.array([0.5, -0.5])
-
-    def __init__(self, J=1., Jz=None, hz=0., boundary_condition=open_bc):
+    def __init__(self, J=1., Jz=None, hz=0., hx=0., boundary_condition=open_bc):
         """
         `hz` can be either a number (for a constant magnetic field) or a
         callable (which is called with the site index and returns the
-        magnetic field on that site).
+        magnetic field on that site).  The same goes for `hx`.
         """
         if Jz is None:
             Jz = J
@@ -66,10 +63,22 @@ class HeisenbergSpinHalfXXZChain(object):
             self.hz = hz
         else:
             self.hz = lambda site_index: hz
+        if isinstance(hx, Callable):
+            self.hx = hx
+        else:
+            self.hx = lambda site_index: hx
+
+        if hx == 0:
+            # S^z sectors corresponding to the single site basis elements
+            self.single_site_sectors = np.array([0.5, -0.5])
+        else:
+            # S^z is not conserved
+            self.single_site_sectors = np.array([0, 0])
 
     def H1(self, site_index):
         half_hz = .5 * self.hz(site_index)
-        return np.array([[half_hz, 0], [0, -half_hz]], self.dtype)
+        half_hx = .5 * self.hx(site_index)
+        return np.array([[half_hz, half_hx], [half_hx, -half_hz]], self.dtype)
 
     def H2(self, Sz1, Sp1, Sz2, Sp2):  # two-site part of H
         """Given the operators S^z and S^+ on two sites in different Hilbert spaces
