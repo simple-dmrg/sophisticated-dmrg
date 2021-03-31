@@ -2,6 +2,9 @@
 sophisticated-dmrg
 ==================
 
+.. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.4651419.svg
+   :target: https://doi.org/10.5281/zenodo.4651419
+
 This code is an expanded `density-matrix renormalization group
 <http://en.wikipedia.org/wiki/Density_matrix_renormalization_group>`_
 (DMRG) program, based on code written for a `tutorial
@@ -25,4 +28,4 @@ Authors
 * Ryan V. Mishmash (UCSB)
 
 Licensed under the MIT license.  If you plan to publish work based on
-this code, please contact us to find out how to cite us.
+this code, [please cite us](https://doi.org/10.5281/zenodo.4651419).
