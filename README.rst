@@ -28,4 +28,4 @@ Authors
 * Ryan V. Mishmash (UCSB)
 
 Licensed under the MIT license.  If you plan to publish work based on
-this code, [please cite us](https://doi.org/10.5281/zenodo.4651419).
+this code, `please cite us <https://doi.org/10.5281/zenodo.4651419>`_.
